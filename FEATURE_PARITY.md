@@ -113,13 +113,13 @@ Old-app evidence summary: no bench/hardware test evidence exists (`DOCS/portable
 
 | Feature | Source | Old implementation (file:line) | New status | Backend/firmware dependency | Verification status | Old working impl? |
 | --- | --- | --- | --- | --- | --- | --- |
-| PIN-only test mode (device keypad PIN, no face/fingerprint) | user prompt | none | Stage 2 UI + FSM; Stage 3 firmware | Firmware today requires PIN then face then fingerprint (`FIRMWARE_ANALYSIS.md` s4) | NOT-STARTED | NO |
-| Two PIN slots (slot 1 admin test, slot 2 user test) | user prompt | none | Stage 3 firmware | Firmware has ONE compiled-in PIN (s4) | NOT-STARTED | NO |
+| PIN-only test mode (device keypad PIN, no face/fingerprint) | user prompt | none | IMPLEMENTED-UNTESTED (firmware compiled, SKETCH-DERIVED; desktop MOCK-TESTED) | Firmware today requires PIN then face then fingerprint (`FIRMWARE_ANALYSIS.md` s4) | MOCK-TESTED (desktop); firmware not run on hardware | NO |
+| Two PIN slots (slot 1 admin test, slot 2 user test) | user prompt | none | IMPLEMENTED-UNTESTED (firmware compiled, SKETCH-DERIVED; desktop MOCK-TESTED) | Firmware has ONE compiled-in PIN (s4) | MOCK-TESTED (desktop); firmware not run on hardware | NO |
 | Local identity file (slot to identity/role) | user prompt | none | Stage 2 | none | NOT-STARTED | NO |
 | Fail-closed production mode ('Hardware verification not available') | user prompt | none | Stage 2 | none | NOT-STARTED | NO |
 | Persistent red test-mode banner + PIN-ONLY TEST MODE label | user prompt | none | Stage 2 | none | NOT-STARTED | NO |
 | Disconnect = immediate lock, re-auth on reconnect | user prompt | none | Stage 2 | none (old app trusted a marker file, `D/usb_watch_agent.py:132-137`) | NOT-STARTED | NO |
-| Serial request IDs, command queue, timeouts, single port owner | user prompt | none | Stage 2 desktop; wire IDs Stage 3 | none (old bridge was not single-owner/queued) | NOT-STARTED | NO |
+| Serial request IDs, command queue, timeouts, single port owner | user prompt | none | IMPLEMENTED-UNTESTED (desktop MOCK-TESTED; wire IDs in firmware compiled, SKETCH-DERIVED) | none (old bridge was not single-owner/queued) | MOCK-TESTED (desktop); firmware not run on hardware | NO |
 | Stale-message rejection (connection generation + state) | user prompt | none | Stage 2 | none | NOT-STARTED | NO |
 | Physical SD upload/download via SerialManager with abort/cleanup | user prompt | none | Stage 4 | old gated off (`D/face_bridge.py:35`) | NOT-STARTED | NO |
 | Runtime Django sign-in, memory-only token (optional mode) | user prompt | none | Stage 5 | none | NOT-STARTED | NO |

@@ -24,8 +24,19 @@
 9. Raw binary SD transfers are not in SerialManager yet; Stage 4 adds a raw-read request mode.
 10. Role dashboards in Stage 2 are labelled placeholders (NOT-STARTED); routing by role is implemented and MOCK-TESTED.
 
+## Stage 3 decisions (made by Claude; review at the gate)
+11. **Q1 board:** the message again contained the placeholder `<F401 Black Pill / F405 Feather>`. Compiled for the sketch header's F401CC Black Pill (SKETCH-DERIVED); the board stays UNRESOLVED and flashing is gated on it too (an F405 board must not get this binary).
+12. **AUTH_PIN_VERIFIED means "the build's whole auth sequence succeeded for slot N"** (PIN-only, or PIN+face+fingerprint with `HSS_REQUIRE_FACTORS=1`) and is printed right before `RESULT: ACCESS GRANTED`; `DBG: EVENT PIN_VERIFIED` echo is suppressed so the desktop never sees a slot-less verified line first.
+13. **Request IDs** are `@<id> <COMMAND>` with `REQ_BEGIN/REQ_END`; **`VERSION`** added so the desktop can detect the firmware generation. Desktop wire IDs stay off until a VERSION handshake (Stage 4).
+14. **PINs** live only in git-ignored `pins_local.h` (random test PINs generated on this PC, never printed). The base sketch copy is not committed because it holds a PIN literal; its hash is in `firmware/BASE_SHA256.txt`.
+15. **`Serial2`** needs `-DENABLE_HWSERIAL2` on the Black Pill variant (control experiment, FIRMWARE_ANALYSIS s13); no pins were invented.
+16. **Arduino CLI** installed as the portable zip (checksum-verified) because the winget MSI needed an elevation prompt; Inno Setup installed via winget; STM32CubeProgrammer is not in winget and needs a manual st.com download.
+
 ## OPEN QUESTIONS
 - Board model (F401 Black Pill vs F405 Feather): the message contained the placeholder text, not an answer.
 - Backup folder missing; Stage 3 cannot start until it exists and hashes verify.
 - Approve system installs? (Inno Setup, STM32CubeProgrammer, Arduino CLI)
 - Does the real board enumerate as VID 0483 / PID 5740? (PIN_AUTH_TEST step 1)
+- Board identity (see item 11) and whether flashing may use the SWD ST-Link or USB DFU.
+- STM32CubeProgrammer: install manually (st.com login) before the flash test.
+- Which physical pins does the fingerprint UART use on your wiring? (build uses core USART2 defaults)

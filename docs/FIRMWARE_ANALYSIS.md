@@ -280,3 +280,8 @@ Conclusions:
 
 ## 12. Lockout policy decision (user, 2026-11-03)
 Lockout that clears only on device reset/power-cycle (`.ino` L935-949, volatile RAM, no timed/admin unlock) is ACCEPTABLE for testing. It is documented here and NOT changed in this build. The desktop mirrors it as state LOCKED and instructs the user to reset the device (`hss/core/auth_fsm.py`).
+
+## 13. Stage 3 compile findings (2026-11-03; compile only, nothing flashed)
+- **Control experiment:** the UNMODIFIED base sketch, built for `STMicroelectronics:stm32:GenF4:pnum=BLACKPILL_F401CC,usb=CDCgen,xserial=generic` (STM32duino core 3.0.0), FAILS to link: `undefined reference to 'Serial2'`. With `-DENABLE_HWSERIAL2` (core `WSerial.h`) it links (66960 bytes). So the sketch's author built it against a configuration that provides `Serial2` by default, which is unknown (a different variant/board such as the Feather F405 mentioned in conflict 1, or a different core version/flags). This does not identify the board; it only shows the Black Pill generic variant does not provide `Serial2` by itself. Label: SKETCH-DERIVED, compile-level evidence.
+- Fingerprint UART pins therefore remain UNVERIFIED: with `-DENABLE_HWSERIAL2` the pins are the core's USART2 defaults (not read from a pin map here).
+- Stage 3 working copy: `firmware/hss_firmware/hss_firmware.ino`; changes vs base in `firmware/CHANGES_vs_BASE.diff` (PIN literal redacted), documented in `docs/SERIAL_PROTOCOL.md` section 10.

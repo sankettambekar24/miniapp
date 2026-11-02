@@ -23,7 +23,7 @@ from typing import Callable
 
 from ..config import AppConfig
 from .discovery import DiscoveryKind, DiscoveryResult, PortInfo, discover, list_system_ports
-from .protocol import MAX_LINE
+from .protocol import MAX_LINE, MAX_WIRE_ID, REQ_BEGIN_PREFIX, REQ_END_PREFIX, wire_command
 
 log = logging.getLogger("hss.serial")
 
@@ -60,6 +60,9 @@ class _Request:
     timeout: float
     callback: Callable[[Response], None] | None
     guard: Callable[[], bool] | None
+    wire: bool = False          # framed as "@<id> <COMMAND>"; completes on REQ_END:<id> (Stage 3 firmware)
+    begun: bool = False         # REQ_BEGIN:<id> seen (wire mode only)
+    errored: str | None = None
     deadline: float = 0.0
     lines: list[str] = field(default_factory=list)
 
@@ -88,6 +91,7 @@ class SerialManager:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.dropped_overlong = 0
+        self.wire_ids = False  # set True only after VERSION reports REQID=1 (Stage 4 handshake)
         # callbacks (invoked on the worker thread)
         self.on_connected: list[Callable[[int, PortInfo], None]] = []
         self.on_disconnected: list[Callable[[str], None]] = []
@@ -109,15 +113,19 @@ class SerialManager:
 
     def send(self, command: str, *, ok_prefixes: tuple[str, ...] = (), err_prefixes: tuple[str, ...] = ("SD_ERROR:",),
              timeout: float = 5.0, callback: Callable[[Response], None] | None = None,
-             guard: Callable[[], bool] | None = None) -> int:
+             guard: Callable[[], bool] | None = None, wire: bool | None = None) -> int:
         """Queue a command. `guard` (e.g. 'session is active') is evaluated at send time on the worker thread;
-        if it returns False the request is REJECTED and nothing is written. Returns the request ID."""
+        if it returns False the request is REJECTED and nothing is written. Returns the request ID.
+        wire=True frames the command with the request ID ("@<id> <COMMAND>") and completes it on the
+        device's REQ_END:<id>; only valid against firmware that reports REQID=1 in its VERSION reply.
+        Default: self.wire_ids (False until the Stage 4 handshake enables it)."""
         if "\n" in command or "\r" in command:
             raise ValueError("command must be a single line")
         with self._id_lock:
             rid = self._next_id
-            self._next_id += 1
-        self._cmdq.put(_Request(rid, command, tuple(ok_prefixes), tuple(err_prefixes), timeout, callback, guard))
+            self._next_id = self._next_id + 1 if self._next_id < MAX_WIRE_ID else 1
+        self._cmdq.put(_Request(rid, command, tuple(ok_prefixes), tuple(err_prefixes), timeout, callback, guard,
+                                wire=self.wire_ids if wire is None else wire))
         return rid
 
     def start(self) -> None:
@@ -217,7 +225,8 @@ class SerialManager:
                 self._finish(req, RequestStatus.REJECTED, error="guard denied (no active session)")
                 continue
             try:
-                self._ser.write(req.command.encode("ascii") + b"\n")
+                wire_line = wire_command(req.id, req.command) if req.wire else req.command
+                self._ser.write(wire_line.encode("ascii") + b"\n")
             except Exception as exc:
                 self._finish(req, RequestStatus.ERROR, error=f"write failed: {type(exc).__name__}")
                 self._drop("write failed")
@@ -251,6 +260,9 @@ class SerialManager:
         req = self._inflight
         if req is None or text.startswith("DBG:"):
             return
+        if req.wire:
+            self._handle_wire_line(req, text)
+            return
         if any(text.startswith(p) for p in req.err_prefixes):
             req.lines.append(text)
             self._inflight = None
@@ -261,6 +273,28 @@ class SerialManager:
             self._finish(req, RequestStatus.OK)
         else:
             req.lines.append(text)
+
+    def _handle_wire_line(self, req: _Request, text: str) -> None:
+        """Wire mode: only output between REQ_BEGIN:<id> and REQ_END:<id> belongs to this request, so late
+        output from an earlier timed-out request (other ids) is ignored."""
+        mine = str(req.id)
+        if text.startswith(REQ_BEGIN_PREFIX):
+            if text[len(REQ_BEGIN_PREFIX):] == mine:
+                req.begun = True
+            return
+        if text.startswith(REQ_END_PREFIX):
+            if text[len(REQ_END_PREFIX):] == mine:
+                self._inflight = None
+                if req.errored:
+                    self._finish(req, RequestStatus.ERROR, error=req.errored)
+                else:
+                    self._finish(req, RequestStatus.OK)
+            return
+        if not req.begun:
+            return  # stale output from a previous request
+        req.lines.append(text)
+        if req.errored is None and any(text.startswith(p) for p in req.err_prefixes):
+            req.errored = text
 
     def _check_timeout(self, now: float) -> None:
         req = self._inflight

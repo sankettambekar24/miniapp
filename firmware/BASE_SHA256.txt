@@ -1,0 +1,1 @@
+﻿base sketch: AF6E3B7A98F61C0F57AE0AAA9FFAC91EEEC7E6DB9AF36F2E98038A69BA813C63  (copied from the path in docs/FIRMWARE_ANALYSIS.md section 0; NOT committed because it contains a PIN literal)

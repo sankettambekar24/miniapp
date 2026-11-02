@@ -1,0 +1,226 @@
+﻿diff --git "a/C:\\Users\\sanke\\AppData\\Local\\Temp\\b.ino" "b/C:\\Users\\sanke\\AppData\\Local\\Temp\\n.ino"
+index bc316fd..0d2b61f 100644
+--- "a/C:\\Users\\sanke\\AppData\\Local\\Temp\\b.ino"
++++ "b/C:\\Users\\sanke\\AppData\\Local\\Temp\\n.ino"
+@@ -3,4 +3,8 @@
+ // PIN keypad -> Face (host PC over USB serial) -> Fingerprint
+ // Protected file on SD card, audit log on SD card, OLED status
++//
++// HSS Stage 3 working copy. Base: firmware_secure_updated.ino (SKETCH-DERIVED,
++// not proven identical to the flashed build). Changes vs base are marked HSS-S3.
++// Protocol: docs/SERIAL_PROTOCOL.md (conformance-tested against hss/core/protocol.py).
+ // ============================================================
+ 
+@@ -12,4 +16,16 @@
+ #include <Adafruit_Fingerprint.h>
+ 
++// ---- HSS-S3: build configuration ------------------------------------------------
++#define HSS_FW_VERSION "0.3.0-stage3"
++// 0 = PIN-only authentication (default). 1 = legacy PIN -> face -> fingerprint sequence.
++// Face/fingerprint code stays compiled in either way; with 0 it is simply not invoked
++// for authentication. Build with:  --build-property "build.extra_flags=-DHSS_REQUIRE_FACTORS=1"
++#ifndef HSS_REQUIRE_FACTORS
++#define HSS_REQUIRE_FACTORS 0
++#endif
++// pins_local.h defines HSS_PIN_SLOT1 / HSS_PIN_SLOT2 (digit strings). It is NOT committed.
++// Copy pins_local.example.h to pins_local.h (build.ps1 does this with random test PINs).
++#include "pins_local.h"
++
+ // Set to 1 only if your installed SD library supports SD.end().
+ #define USE_SD_END 0
+@@ -51,5 +67,8 @@ const char keyMap[4][4] = {
+ 
+ // ---------------- Security ----------------
+-const char CORRECT_PIN[] = "<redacted>";  // Change before deployment.
++// HSS-S3: two PIN slots (1 = admin test, 2 = user test). The firmware reports the slot
++// number only; it never knows or reports a role (role lives in the desktop identity file).
++const char* const SLOT_PINS[2] = {HSS_PIN_SLOT1, HSS_PIN_SLOT2};
++uint8_t activeSlot = 0;  // 0 = none
+ const uint8_t MAX_PIN_LEN = 12;
+ const int MAX_ATTEMPTS = 3;
+@@ -176,7 +195,11 @@ bool ensureSD(bool force) {
+ // Appends events without storing PIN digits or biometric data.
+ // Timestamp is milliseconds since boot, not wall-clock time.
+-void logEvent(const char* eventName) {
+-  Serial.print("DBG: EVENT ");
+-  Serial.println(eventName);
++// HSS-S3: echo=false writes the audit entry without the "DBG: EVENT" serial line (used for
++// PIN_VERIFIED, which is superseded by AUTH_PIN_VERIFIED:<slot>; see docs/SERIAL_PROTOCOL.md).
++void logEventEx(const char* eventName, bool echo) {
++  if (echo) {
++    Serial.print("DBG: EVENT ");
++    Serial.println(eventName);
++  }
+ 
+   if (!ensureSD(false)) {
+@@ -204,4 +227,6 @@ void logEvent(const char* eventName) {
+ }
+ 
++void logEvent(const char* eventName) { logEventEx(eventName, true); }
++
+ // ---------------- Keypad ----------------
+ char scanKeypad() {
+@@ -334,4 +359,5 @@ void revokeAccessSession(const char* eventName) {
+   bool wasActive = accessSession;
+   accessSession = false;
++  activeSlot = 0;
+   lastAuthorizedActivity = 0;
+   clearEnrollmentAuthorization();
+@@ -840,5 +866,15 @@ void enrollFingerprintFromHost(const char* username) {
+ }
+ 
+-void processHostCommand(const char* command) {
++void dispatchHostCommand(const char* command) {
++  // HSS-S3: VERSION is answered even when locked or unauthenticated; it reveals no data and lets the
++  // desktop identify the protocol generation (FIRMWARE_ANALYSIS.md conflict 9: flashed build unproven).
++  if (strcmp(command, "VERSION") == 0) {
++    Serial.print("HSS_FW:");
++    Serial.print(HSS_FW_VERSION);
++    Serial.print(":AUTH=");
++    Serial.print(HSS_REQUIRE_FACTORS ? "PIN_FACE_FP" : "PIN_ONLY");
++    Serial.println(":SLOTS=2:REQID=1");
++    return;
++  }
+   if (lockedOut) {
+     Serial.println("SD_ERROR:LOCKED_OUT");
+@@ -892,4 +928,32 @@ void processHostCommand(const char* command) {
+ }
+ 
++// HSS-S3 request IDs (optional, backwards compatible):  "@<id> <COMMAND>"  with <id> = 1..9 digits.
++// The device brackets that command's output with REQ_BEGIN:<id> ... REQ_END:<id>, so the host can
++// match replies exactly and discard late output from a timed-out request (legacy protocol correlates
++// by order only; FIRMWARE_ANALYSIS.md s3, s8). Commands without "@" behave exactly as before.
++void processHostCommand(const char* command) {
++  if (command[0] != '@') {
++    dispatchHostCommand(command);
++    return;
++  }
++  const char* p = command + 1;
++  uint32_t id = 0;
++  uint8_t digits = 0;
++  while (*p >= '0' && *p <= '9' && digits < 9) {
++    id = id * 10 + (uint32_t)(*p - '0');
++    p++;
++    digits++;
++  }
++  if (digits == 0 || id == 0 || *p != ' ' || p[1] == '\0') {
++    Serial.println("SD_ERROR:INVALID_REQUEST_ID");
++    return;
++  }
++  Serial.print("REQ_BEGIN:");
++  Serial.println(id);
++  dispatchHostCommand(p + 1);
++  Serial.print("REQ_END:");
++  Serial.println(id);
++}
++
+ void pollHostCommands() {
+   while (Serial.available()) {
+@@ -922,13 +986,30 @@ void clearPIN() {
+ }
+ 
+-bool pinMatches() {
+-  size_t expected = strlen(CORRECT_PIN);
+-  if (pinLen != expected) return false;
++// HSS-S3: returns the matching slot (1..2) or 0. Both slots are always compared in full
++// (no early exit) so timing does not reveal which slot was closer.
++uint8_t matchedSlot() {
++  uint8_t found = 0;
++  for (uint8_t slot = 0; slot < 2; slot++) {
++    size_t expected = strlen(SLOT_PINS[slot]);
++    uint8_t diff = (pinLen != expected) ? 1 : 0;
++    for (size_t i = 0; i < expected; i++) {
++      char entered = (i < pinLen) ? enteredPIN[i] : 0;
++      diff |= (uint8_t)(entered ^ SLOT_PINS[slot][i]);
++    }
++    if (diff == 0) found = slot + 1;
++  }
++  return found;
++}
+ 
+-  uint8_t diff = 0;
+-  for (size_t i = 0; i < expected; i++) {
+-    diff |= (uint8_t)(enteredPIN[i] ^ CORRECT_PIN[i]);
++// HSS-S3: setup-time sanity check; refuses to run with ambiguous or malformed slot PINs.
++bool slotPinsValid() {
++  for (uint8_t slot = 0; slot < 2; slot++) {
++    size_t n = strlen(SLOT_PINS[slot]);
++    if (n < 4 || n > MAX_PIN_LEN) return false;
++    for (size_t i = 0; i < n; i++) {
++      if (SLOT_PINS[slot][i] < '0' || SLOT_PINS[slot][i] > '9') return false;
++    }
+   }
+-  return diff == 0;
++  return strcmp(SLOT_PINS[0], SLOT_PINS[1]) != 0;
+ }
+ 
+@@ -940,4 +1021,5 @@ bool registerFailure(const char* eventName) {
+   if (wrongAttempts >= MAX_ATTEMPTS) {
+     lockedOut = true;
++    Serial.println("AUTH_LOCKED");  // HSS-S3 (planned string); legacy lines follow
+     clearEnrollmentAuthorization();
+     logEvent("SYSTEM_LOCKED");
+@@ -952,8 +1034,11 @@ void authenticate() {
+   // Never carry a previous session into a new authentication attempt.
+   revokeAccessSession("SESSION_REVOKED_FOR_REAUTH");
+-  bool pinOk = pinMatches();
++  uint8_t slot = matchedSlot();
++  bool pinOk = (slot != 0);
+   clearPIN();
+ 
+   if (!pinOk) {
++    Serial.print("AUTH_PIN_FAILED:");  // HSS-S3: attempt number (1..MAX_ATTEMPTS)
++    Serial.println(wrongAttempts + 1);
+     if (registerFailure("PIN_FAILED")) return;
+     showMessage("PIN", "INCORRECT");
+@@ -962,6 +1047,7 @@ void authenticate() {
+   }
+ 
+-  logEvent("PIN_VERIFIED");
++  logEventEx("PIN_VERIFIED", false);  // HSS-S3: serial echo superseded by AUTH_PIN_VERIFIED:<slot>
+ 
++#if HSS_REQUIRE_FACTORS
+   if (!verifyFace()) {
+     showMessage("FACE", "DENIED");
+@@ -979,10 +1065,16 @@ void authenticate() {
+     return;
+   }
++#endif  // HSS_REQUIRE_FACTORS
+ 
+   wrongAttempts = 0;
+   accessSession = true;
++  activeSlot = slot;
+   lastAuthorizedActivity = millis();
+   clearEnrollmentAuthorization();
+   showMessage("ACCESS", "GRANTED");
++  // HSS-S3: emitted only once the build's whole authentication sequence has succeeded
++  // (PIN only, or PIN+face+fingerprint when HSS_REQUIRE_FACTORS=1). Slot only, never a role.
++  Serial.print("AUTH_PIN_VERIFIED:");
++  Serial.println(slot);
+   Serial.println("RESULT: ACCESS GRANTED");
+   logEvent("ACCESS_GRANTED");
+@@ -1015,12 +1107,22 @@ void setup() {
+   showMessage("SYSTEM", "STARTING");
+ 
++  if (!slotPinsValid()) {  // HSS-S3
++    showMessage("PIN CONFIG", "INVALID");
++    Serial.println("DBG: CONFIG ERROR: slot PINs invalid (need 2 distinct 4-12 digit PINs)");
++    while (true) delay(1000);
++  }
++
+   finger.begin(57600);
+   delay(100);
+ 
+   if (!finger.verifyPassword()) {
+-    showMessage("FINGER", "ERROR");
+     Serial.println("DBG: FINGERPRINT SENSOR NOT FOUND");
+     logEvent("FINGERPRINT_SENSOR_NOT_FOUND");
+-    while (true) delay(1000);
++#if HSS_REQUIRE_FACTORS
++    showMessage("FINGER", "ERROR");
++    while (true) delay(1000);  // base behaviour: sensor mandatory when it is part of authentication
++#else
++    Serial.println("DBG: continuing without fingerprint sensor (PIN-only build)");  // HSS-S3
++#endif
+   }
+ 

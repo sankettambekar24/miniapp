@@ -10,3 +10,8 @@ build/
 dist/
 release/
 *.log
+
+firmware/hss_firmware/pins_local.h
+firmware/build/
+tools/
+firmware/BASE_*.orig

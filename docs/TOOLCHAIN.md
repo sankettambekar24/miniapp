@@ -39,3 +39,14 @@ arduino-cli core install STMicroelectronics:stm32
 # alternative to arduino-cli: PlatformIO  ->  pip install platformio   (inside a venv)
 ```
 Winget package IDs above are from memory and UNVERIFIED; confirm with `winget search <name>` before running.
+
+## Update 2026-11-03 (Stage 3) - installs performed (approved: Inno Setup, STM32CubeProgrammer, Arduino CLI)
+**Correction:** the Stage 1 table said winget was installed. It is installed but NOT on PATH in this shell; use `%LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe` (v1.29.380).
+
+| Tool | Result |
+|---|---|
+| Inno Setup 6 | **INSTALLED** via `winget install --id JRSoftware.InnoSetup -e` (verified ID; winget reported 6.7.3). `ISCC.exe` at `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe` (per-user). |
+| Arduino CLI | winget `ArduinoSA.CLI` 1.5.1 (verified ID) is an MSI that hung on an elevation prompt, so the process was stopped. Installed instead the **official portable zip v1.5.1** from the same GitHub release, SHA-256 matched GitHub's published digest, into `tools\arduino-cli\` (git-ignored). Config: `tools\arduino-data\arduino-cli.yaml`. |
+| STM32duino core | `STMicroelectronics:stm32` **3.0.0** (+ CMSIS 6.3.0, xpack arm-none-eabi-gcc 14.2.1-1.1) in `tools\arduino-data` |
+| Libraries | SD 1.3.0, Adafruit GFX Library 1.13.0, Adafruit BusIO 1.17.4, Adafruit SSD1306 2.5.17, Adafruit Fingerprint Sensor Library 2.1.4 in `tools\arduino-user` |
+| STM32CubeProgrammer | **NOT INSTALLED**: `winget search` finds no package (tried STM32CubeProgrammer, STM32Cube, STMicroelectronics, ST-LINK). Download manually from st.com (ST account login required), then the CLI is typically `C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe`. Needed only for flashing/dumping, which are gated on the backup. |

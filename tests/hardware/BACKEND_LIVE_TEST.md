@@ -45,3 +45,6 @@ Gate: Claude runs/arms nothing until you report that Part A passed. Claude canno
 4. Each call's redacted response is saved in `tests/evidence/live/` (timestamp, outcome, body or error status/code/request_id). Then delete the armed file. Claude reviews the evidence and relabels routes.
 
 Routes that become VERIFIED-LIVE-API ONLY if their evidence step shows PASS: `POST /auth/token/`, `GET /auth/me/`, `POST /auth/logout/`, authenticated `GET` of devices/files/users/offline-policies/audit (Part A with --login); `POST /admin/users/`, `POST /admin/users/{id}/disable/` (cleanup), `POST /devices/`, `POST /devices/{id}/status/` (ACTIVE, REVOKED), `POST /files/metadata/`, `POST /files/{id}/grants/`, `POST /files/{id}/grants/{gid}/revoke/` (cleanup). Anything that fails stays IMPLEMENTED-UNTESTED (with the evidence attached).
+
+## RESULT (2026-11-03)
+Run by the user; all recorded steps succeeded; evidence `tests/evidence/live/live_20261103T034513_write.json`. Reviewed and relabelled (see `FEATURE_PARITY.md` 1d). Armed approvals file deleted afterwards. Rows left behind: `tests/evidence/live/REMAINING_ROWS_hsstest_11030345010b4e.md`.

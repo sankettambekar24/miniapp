@@ -133,12 +133,12 @@ Old-app evidence summary: no bench/hardware test evidence exists (`DOCS/portable
 | Admin dashboard (role from identity file only) | user prompt | `hss/ui/dashboards.py`; role from `hss/core/auth_fsm.py` identity resolution, no selector | MOCK-TESTED (offscreen UI, `test_dashboards.py`) | PIN slot -> local identity file; hardware not run |
 | User dashboard | user prompt | same; admin-only tabs absent | MOCK-TESTED | same |
 | Overview (real or absent data; no demo data) | user prompt | `Overview` in dashboards.py; counts only after backend sign-in | MOCK-TESTED | backend optional |
-| User management (list/create/disable/set role) | user prompt | `_users_tab`; `BackendClient.list_users/create_user/disable_user/set_user_role` | MOCK-TESTED (fake transport); live writes IMPLEMENTED-UNTESTED | backend JWT sign-in |
-| Device registry (list/register/status/assign) | user prompt | `_devices_tab` | MOCK-TESTED; live writes IMPLEMENTED-UNTESTED | backend JWT sign-in |
-| File metadata + permission grants (list/add/grant/revoke) | user prompt | `_files_tab`; grants LIST/READ only (backend schema) | MOCK-TESTED; live writes IMPLEMENTED-UNTESTED | backend JWT sign-in |
-| Audit view (admin) | user prompt | `_audit_tab`, event-type filter, paging | MOCK-TESTED | backend JWT sign-in, admin |
-| Offline policies (list/revoke) | user prompt | `_policies_tab` | MOCK-TESTED; live writes IMPLEMENTED-UNTESTED | backend JWT sign-in |
-| Backend sign-in (memory-only JWT), health, cold-start retry, typed errors, redacted logs | user prompt | `hss/backend/`, `BackendPanel`; docs/BACKEND_CLIENT.md | MOCK-TESTED (contract tests on recorded probes); NOT VERIFIED-LIVE-API for anything beyond the Stage 1 GET/HEAD/OPTIONS observations | Render backend |
+| User management (list/create/disable/set role) | user prompt | `_users_tab`; `BackendClient.list_users/create_user/disable_user/set_user_role` | MOCK-TESTED; VERIFIED-LIVE-API: list, create, disable (live 2026-11-03 (evidence `live_20261103T034513_write.json`)); set role IMPLEMENTED-UNTESTED | backend JWT sign-in |
+| Device registry (list/register/status/assign) | user prompt | `_devices_tab` | MOCK-TESTED; VERIFIED-LIVE-API: list, create, status PENDING->ACTIVE->REVOKED (live 2026-11-03 (evidence `live_20261103T034513_write.json`)); assign IMPLEMENTED-UNTESTED | backend JWT sign-in |
+| File metadata + permission grants (list/add/grant/revoke) | user prompt | `_files_tab`; grants LIST/READ only (backend schema) | MOCK-TESTED; VERIFIED-LIVE-API: list, metadata create, LIST grant create + revoke (live 2026-11-03 (evidence `live_20261103T034513_write.json`)); grants list IMPLEMENTED-UNTESTED | backend JWT sign-in |
+| Audit view (admin) | user prompt | `_audit_tab`, event-type filter, paging | MOCK-TESTED; VERIFIED-LIVE-API: list (12 rows seen) (live 2026-11-03 (evidence `live_20261103T034513_write.json`)) | backend JWT sign-in, admin |
+| Offline policies (list/revoke) | user prompt | `_policies_tab` | MOCK-TESTED; VERIFIED-LIVE-API: list (0 rows) (live 2026-11-03 (evidence `live_20261103T034513_write.json`)); revoke IMPLEMENTED-UNTESTED | backend JWT sign-in |
+| Backend sign-in (memory-only JWT), health, cold-start retry, typed errors, redacted logs | user prompt | `hss/backend/`, `BackendPanel`; docs/BACKEND_CLIENT.md | MOCK-TESTED; VERIFIED-LIVE-API: health live/ready, login, me (live 2026-11-03 (evidence `live_20261103T034513_write.json`)); logout NOT proven (client clears tokens locally and swallows server errors), refresh NOT exercised | Render backend |
 | Physical SD: list / download / upload via SerialManager only | user prompt | `hss/core/sd_ops.py`, `hss/ui/sd_page.py`, docs/SD_DESIGN.md | MOCK-TESTED (fake firmware, ~150 SD tests); hardware script `tests/hardware/SD_TEST.md` (+ role addendum R1-R6) NOT-STARTED | SKETCH-DERIVED firmware, flashing gated on BACKUP CONFIRMED |
 | SD name/path validation, size checks, chunk ack, partial cleanup verification, cancel | user prompt | sd_ops.py (upload <= 8 MiB, root names, download cap 32 MiB) | MOCK-TESTED | firmware has no delete command: leftover partial can only be reported |
 | SD role policy: upload ADMIN-only; USER list/download only with matching LIST/READ permission, fail-closed until loaded | user prompt | `hss/core/sd_policy.py`, enforced in `SdService` (`FORBIDDEN`) and `hss/ui/sd_page.py` | MOCK-TESTED (`test_sd_policy.py`, `test_dashboards.py`); permission mapping to the backend is source-derived (IMPLEMENTED-UNTESTED live) | backend `GET /files/` (LIST) and `GET /files/{id}/` (READ); `display_name` must equal the SD path |
@@ -149,6 +149,28 @@ Old-app evidence summary: no bench/hardware test evidence exists (`DOCS/portable
 | First-run setup (%LOCALAPPDATA%\HSS, templates, README) | user prompt | `hss/firstrun.py` | MOCK-TESTED (frozen smoke test on dev PC) | none |
 | PyInstaller one-folder windowed build | user prompt | `hss.spec`, `build_release.ps1` | MOCK-TESTED: frozen smoke test on dev PC only; GUI subsystem verified; no secrets bundled | other PCs unverified |
 | Inno Setup per-user installer (shortcuts, uninstall, upgrade-in-place, data kept) | user prompt | `installer/HSS.iss` -> `release/HSS-Setup.exe` (unsigned) | MOCK-TESTED: silent install/uninstall and shortcuts on dev PC; upgrade-in-place (second install over the first kept user data, one uninstall entry) also tested on dev PC; unverified-on-other-PCs | CLEAN_PC_CHECKLIST.md |
+
+### 1d. Live API verification (user-run 2026-11-03; evidence `tests/evidence/live/live_20261103T034513_write.json`)
+Run by the user against https://mini-backend-z8dr.onrender.com with an ADMIN login typed interactively. 26 recorded steps: 25 success, 1 informational. `VERIFIED-LIVE-API` below means the evidence step shows success (the client treats only 2xx as success; the 401 steps record the status explicitly). Tag `hsstest_11030345010b4e`.
+| Route | Label | Evidence step |
+|---|---|---|
+| GET /health/live/ | VERIFIED-LIVE-API | health_live (body status ok) |
+| GET /health/ready/ | VERIFIED-LIVE-API | health_ready (database ok, cache ok) |
+| GET /auth/me/, /devices/, /files/, /offline-policies/, /audit/events/, /admin/users/ (no token) | VERIFIED-LIVE-API: 401 NOT_AUTHENTICATED | unauth_*_expect_401 |
+| GET /files/{uuid}/content/ (no token) | VERIFIED-LIVE-API: 401 only. The always-503 behaviour is still UNVERIFIED live (needs an authenticated owner/READ grantee) | unauth_file_content_expect_401 |
+| POST /auth/token/ | VERIFIED-LIVE-API | login (role ADMIN; later authed calls succeeded) |
+| GET /auth/me/ | VERIFIED-LIVE-API | me |
+| GET /devices/, /files/, /offline-policies/, /admin/users/, /audit/events/ (ADMIN) | VERIFIED-LIVE-API | list_* (counts 0, 0, 0, 2, 12) |
+| POST /admin/users/ | VERIFIED-LIVE-API | create_user (role USER, active) |
+| POST /admin/users/{id}/disable/ | VERIFIED-LIVE-API | cleanup_disable_user (is_active false) |
+| POST /devices/ | VERIFIED-LIVE-API | create_device (status PENDING) |
+| POST /devices/{id}/status/ | VERIFIED-LIVE-API | device_status_ACTIVE, cleanup_device_revoked (REVOKED) |
+| POST /files/metadata/ | VERIFIED-LIVE-API | create_file_metadata (size_bytes 0) |
+| POST /files/{id}/grants/ | VERIFIED-LIVE-API | create_grant (LIST, active true) |
+| POST /files/{id}/grants/{gid}/revoke/ | VERIFIED-LIVE-API | cleanup_revoke_grant (revoked_at set, active false) |
+| POST /auth/logout/ | NOT proven (IMPLEMENTED-UNTESTED): the `logout` step only shows tokens were cleared locally | logout |
+| Everything else (token refresh, user PATCH/role, device assign, grants list, detail GETs, offline revoke, hardware-auth routes, auth/register, change-password, content 503) | unchanged (IMPLEMENTED-UNTESTED / UNVERIFIED) | not exercised |
+Observations: `/auth/me/` showed `last_login_at: null` right after a successful login. Remaining `hsstest_11030345010b4e` rows are listed in `tests/evidence/live/REMAINING_ROWS_hsstest_11030345010b4e.md`. Hardware-verified login/session, file content and offline-policy issuance stay BLOCKED (not exercised, source-derived).
 
 ## 2. Security/quality findings in old app
 

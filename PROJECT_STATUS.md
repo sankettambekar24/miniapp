@@ -4,7 +4,7 @@ Date: 2026-11-03. Stages 1-5 done, Stage 6 groundwork done (installer built, dev
 ## Gates / blockers
 - BLOCKED-ON-BACKUP: `C:\mini project\HSS_Firmware_Backup\` missing. No flashing, none proposed until "BACKUP CONFIRMED" (then re-verify hashes).
 - Board unresolved (F401 assumed; do not flash an F405 with this binary). STM32CubeProgrammer not installed (manual st.com download).
-- Backend writes: none ever sent. Approval list in `tests/hardware/BACKEND_LIVE_TEST.md`; `tests/live/APPROVED_ENDPOINTS.txt` does not exist.
+- Backend writes: the user ran approved items 1-5 on 2026-11-03 (item 6 never); armed file deleted. Leftover rows (tag `hsstest_11030345010b4e`): `tests/evidence/live/REMAINING_ROWS_hsstest_11030345010b4e.md`.
 
 ## Built (all MOCK-TESTED unless stated)
 - Core: SerialManager (+`run_transaction`), PIN FSM, discovery, identity file, factors stubs; firmware working copy (compiled only).
@@ -13,7 +13,7 @@ Date: 2026-11-03. Stages 1-5 done, Stage 6 groundwork done (installer built, dev
 - Stage 6 groundwork: `hss.spec`, `installer/HSS.iss`, `build_release.ps1`, `hss/firstrun.py`, `release/HSS-Setup.exe` (unsigned; SHA-256 94985ED84C89E3F35A4B6CC8E8A50E14FD0E75515112215F1BA7874321F7509C), `tests/release/CLEAN_PC_CHECKLIST.md`, `docs/TEST_REPORT.md`.
 
 ## Test status
-348 automated tests pass (docs/TEST_REPORT.md). VERIFIED-HARDWARE 0. VERIFIED-LIVE-API only Stage 1 read-only observations.
+348 automated tests pass (docs/TEST_REPORT.md). VERIFIED-HARDWARE 0. VERIFIED-LIVE-API: Stage 1 read-only observations + the user-run write harness of 2026-11-03 (evidence `tests/evidence/live/live_20261103T034513_write.json`; routes in FEATURE_PARITY 1d; logout NOT proven).
 
 ## How to run
 - Tests: `.venv\Scripts\python -m pytest`. Release: `powershell build_release.ps1`. Firmware compile: `powershell firmwareuild.ps1`.
@@ -24,5 +24,8 @@ Date: 2026-11-03. Stages 1-5 done, Stage 6 groundwork done (installer built, dev
 - Backend writes 1-5 approved (NOT 6), staged in `tests/live/APPROVED_ENDPOINTS.pending.txt`, NOT armed, none run; waits for your read-only Part A confirmation + your own interactive admin login. Harness now records each redacted response.
 
 ## Next (user)
-1. Backup + "BACKUP CONFIRMED"; 2. run hardware scripts (PIN_AUTH_TEST, FIRMWARE_FLASH_AND_AUTH_TEST, SD_TEST); 3. backend: run Part A, report, say ARM WRITES, run the --write step yourself (BACKEND_LIVE_TEST.md); 4. clean-PC checklist. Then final TEST_REPORT update.
+1. Backup + "BACKUP CONFIRMED"; 2. run hardware scripts (PIN_AUTH_TEST, FIRMWARE_FLASH_AND_AUTH_TEST, SD_TEST); 3. (backend live run DONE) optionally ask me to make `logout()` report server success, then re-run a short live check; 4. clean-PC checklist. Then final TEST_REPORT update.
 
+
+## Live backend result (2026-11-03)
+All approved writes and cleanup succeeded; see FEATURE_PARITY 1d and docs/TEST_REPORT.md. Remaining hsstest_ rows cannot be deleted (no DELETE routes). Claude never held credentials; no write was run by Claude.

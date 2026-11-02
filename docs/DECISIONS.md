@@ -50,6 +50,11 @@
 28. **Name convention CONFIRMED by user (2026-11-03):** backend `display_name` == SD path, and names are FAT 8.3-safe (e.g. `HSSTEST1.TXT`; base 1-8 + optional 1-3 extension, no spaces/extra dots; each `/` segment checked). Matching against SD listings is case-insensitive (FAT). Enforcement: `check_83_safe()` in `hss/core/sd_policy.py`; the Add-file-metadata dialog warns and asks before creating a non-8.3 name; `GrantIndex.build` collects a warning per non-8.3 backend name (shown after permissions load) because such a record can never match an SD file. Not a hard block: the user may still create it.
 29. **Live write run armed (2026-11-03, user: PART A PASSED, ARM WRITES 1-5):** `tests/live/APPROVED_ENDPOINTS.txt` created from the pending file (git-ignored; items 1-5 only, item 6 excluded). NOTE: no Part A evidence JSON was present in `tests/evidence/live/` when arming; the write run repeats login/me/lists and saves its own evidence. The harness's test file record is named `hsstest_<mmddhhmmss><rand>_file.txt` (the approved `hsstest_` prefix) and is a metadata-only record, so it intentionally violates the 8.3 convention and will not match any SD file.
 
+30. **Live write run reviewed (2026-11-03):** user ran the approved items 1-5 against the production backend with their own ADMIN login; evidence `tests/evidence/live/live_20261103T034513_write.json` (26 records: 25 success + 1 informational `created_ids`; the informational row has no `ok` field and only looks like a FAIL in a naive scan). No secrets in the evidence (scanned). Routes relabelled VERIFIED-LIVE-API only where a step shows success; `logout` is explicitly NOT relabelled because `BackendClient.logout()` swallows server errors, so the harness check only proved local token clearing. Item 6 was never run.
+31. **Cleanup and leftovers:** the harness's cleanup steps all succeeded (grant revoked, device REVOKED, user disabled), confirmed from the server's own responses, not re-read by separate GETs. Rows that cannot be removed (tag `hsstest_11030345010b4e`): disabled user, REVOKED device, file metadata (never cleaned: no DELETE route), revoked grant, permanent audit events. See `tests/evidence/live/REMAINING_ROWS_hsstest_11030345010b4e.md`.
+32. **Disarmed:** the armed approvals file was deleted after the run; only the pending template remains. Any further write run needs a new explicit approval.
+33. **Suggested improvement (not done):** make `BackendClient.logout()` report whether the server call succeeded (return a flag) so a future live run can prove `POST /auth/logout/`.
+
 ## OPEN QUESTIONS
 - Board model (F401 Black Pill vs F405 Feather): the message contained the placeholder text, not an answer.
 - Backup folder missing; Stage 3 cannot start until it exists and hashes verify.
@@ -59,4 +64,3 @@
 - STM32CubeProgrammer: install manually (st.com login) before the flash test.
 - Which physical pins does the fingerprint UART use on your wiring? (build uses core USART2 defaults)
 - Approve (or edit) the 6 backend write endpoints listed in the stop-gate report / BACKEND_LIVE_TEST.md.
-- Backend live: run Part A and report; then say ARM WRITES (items 1-5 only) and run the write step yourself with your admin login.

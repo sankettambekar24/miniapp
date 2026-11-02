@@ -1,7 +1,7 @@
 # TEST REPORT (updated 2026-11-03, final pass incl. SD role policy)
 
 Labels: VERIFIED-HARDWARE / VERIFIED-LIVE-API / MOCK-TESTED / IMPLEMENTED-UNTESTED / BLOCKED / NOT-STARTED.
-**VERIFIED-HARDWARE: 0 results. VERIFIED-LIVE-API: only the Stage 1 GET/HEAD/OPTIONS observations (health 200, protected GETs 401, POST-only 405, docs 404).**
+**VERIFIED-HARDWARE: 0 results. VERIFIED-LIVE-API: Stage 1 GET/HEAD/OPTIONS observations plus the user-run write harness of 2026-11-03 (`tests/evidence/live/live_20261103T034513_write.json`, 25/25 recorded calls succeeded; routes listed in `FEATURE_PARITY.md` 1d). `POST /auth/logout/` is not proven.**
 
 ## Automated (MOCK-TESTED): 348 passed, 0 failed, 0 skipped
 `.venv\Scripts\python -m pytest` - fake serial, fake firmware, fake HTTP transport, offscreen Qt. No hardware, no network.
@@ -41,7 +41,7 @@ Labels: VERIFIED-HARDWARE / VERIFIED-LIVE-API / MOCK-TESTED / IMPLEMENTED-UNTEST
 | PIN auth on real board (legacy firmware) | NOT-STARTED | tests/hardware/PIN_AUTH_TEST.md |
 | Flash + auth with Stage 3 firmware | NOT-STARTED, BLOCKED-ON-BACKUP | tests/hardware/FIRMWARE_FLASH_AND_AUTH_TEST.md |
 | Physical SD (16 steps + role addendum R1-R6) | NOT-STARTED | tests/hardware/SD_TEST.md |
-| Backend live: Part A read-only, then approved writes 1-5 (staged, not armed; item 6 never) | NOT-STARTED | tests/hardware/BACKEND_LIVE_TEST.md |
+| Backend live: approved writes 1-5 | DONE by user 2026-11-03: VERIFIED-LIVE-API for the routes in FEATURE_PARITY 1d; item 6 never run; leftovers in `tests/evidence/live/REMAINING_ROWS_hsstest_11030345010b4e.md` | tests/hardware/BACKEND_LIVE_TEST.md |
 | Clean-PC install | NOT-STARTED | tests/release/CLEAN_PC_CHECKLIST.md |
 
 ## Known limits

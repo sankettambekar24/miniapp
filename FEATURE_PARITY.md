@@ -126,6 +126,29 @@ Old-app evidence summary: no bench/hardware test evidence exists (`DOCS/portable
 | Inno Setup per-user installer, data in %LOCALAPPDATA%\HSS | user prompt | none | Stage 6 | none | NOT-STARTED | NO |
 | Face/fingerprint interface + disabled stubs | user prompt | none | Stage 2 | none (old app had live face code, excluded by D4) | NOT-STARTED | NO |
 
+### 1c. Stages 4-6 features (merged pass, 2026-11-03)
+
+| Feature | Source | Implementation | Status / verification | Dependency |
+| --- | --- | --- | --- | --- |
+| Admin dashboard (role from identity file only) | user prompt | `hss/ui/dashboards.py`; role from `hss/core/auth_fsm.py` identity resolution, no selector | MOCK-TESTED (offscreen UI, `test_dashboards.py`) | PIN slot -> local identity file; hardware not run |
+| User dashboard | user prompt | same; admin-only tabs absent | MOCK-TESTED | same |
+| Overview (real or absent data; no demo data) | user prompt | `Overview` in dashboards.py; counts only after backend sign-in | MOCK-TESTED | backend optional |
+| User management (list/create/disable/set role) | user prompt | `_users_tab`; `BackendClient.list_users/create_user/disable_user/set_user_role` | MOCK-TESTED (fake transport); live writes IMPLEMENTED-UNTESTED | backend JWT sign-in |
+| Device registry (list/register/status/assign) | user prompt | `_devices_tab` | MOCK-TESTED; live writes IMPLEMENTED-UNTESTED | backend JWT sign-in |
+| File metadata + permission grants (list/add/grant/revoke) | user prompt | `_files_tab`; grants LIST/READ only (backend schema) | MOCK-TESTED; live writes IMPLEMENTED-UNTESTED | backend JWT sign-in |
+| Audit view (admin) | user prompt | `_audit_tab`, event-type filter, paging | MOCK-TESTED | backend JWT sign-in, admin |
+| Offline policies (list/revoke) | user prompt | `_policies_tab` | MOCK-TESTED; live writes IMPLEMENTED-UNTESTED | backend JWT sign-in |
+| Backend sign-in (memory-only JWT), health, cold-start retry, typed errors, redacted logs | user prompt | `hss/backend/`, `BackendPanel`; docs/BACKEND_CLIENT.md | MOCK-TESTED (contract tests on recorded probes); NOT VERIFIED-LIVE-API for anything beyond the Stage 1 GET/HEAD/OPTIONS observations | Render backend |
+| Physical SD: list / download / upload via SerialManager only | user prompt | `hss/core/sd_ops.py`, `hss/ui/sd_page.py`, docs/SD_DESIGN.md | MOCK-TESTED (fake firmware, ~150 SD tests); hardware script `tests/hardware/SD_TEST.md` NOT-STARTED | SKETCH-DERIVED firmware, flashing gated on BACKUP CONFIRMED |
+| SD name/path validation, size checks, chunk ack, partial cleanup verification, cancel | user prompt | sd_ops.py (upload <= 8 MiB, root names, download cap 32 MiB) | MOCK-TESTED | firmware has no delete command: leftover partial can only be reported |
+| Backend file content download | design doc | `_files_tab` button 'Download content' | BLOCKED: backend always returns 503 (`storage/views.py:108-115`) | backend |
+| Backend offline-policy issuance | design doc | `_policies_tab` button 'Issue policy' | BLOCKED: backend always returns 503 (`offline_policies/views.py:146-161`) | backend |
+| Hardware-verified backend login / session issuance | design doc | none possible | BLOCKED: complete always 409 FACTOR_VERIFICATION_UNAVAILABLE; factors stored verified=false | backend |
+| Face / fingerprint verification | design doc | `hss/factors/` disabled stubs (decision D4) | NOT-STARTED (never shown as active) | dlib/AS608 excluded |
+| First-run setup (%LOCALAPPDATA%\HSS, templates, README) | user prompt | `hss/firstrun.py` | MOCK-TESTED (frozen smoke test on dev PC) | none |
+| PyInstaller one-folder windowed build | user prompt | `hss.spec`, `build_release.ps1` | MOCK-TESTED: frozen smoke test on dev PC only; GUI subsystem verified; no secrets bundled | other PCs unverified |
+| Inno Setup per-user installer (shortcuts, uninstall, upgrade-in-place, data kept) | user prompt | `installer/HSS.iss` -> `release/HSS-Setup.exe` (unsigned) | MOCK-TESTED: silent install/uninstall and shortcuts on dev PC; upgrade-in-place (second install over the first kept user data, one uninstall entry) also tested on dev PC; unverified-on-other-PCs | CLEAN_PC_CHECKLIST.md |
+
 ## 2. Security/quality findings in old app
 
 1. **Hardcoded COM15 default** - `D/face_bridge.py:25` (and messages `:306,1417`); a wrong port loops forever with no UI (`:286-310`).

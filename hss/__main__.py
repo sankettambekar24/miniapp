@@ -1,27 +1,59 @@
-"""Entry point. Run with `pythonw -m hss` (or the frozen windowed exe) for no console window."""
+"""Entry point. Run with `pythonw -m hss` (or the frozen windowed exe) for no console window.
+
+`--smoke [--smoke-out FILE]` builds the window with a stopped serial manager (no port is ever opened), runs the
+event loop briefly, writes a JSON report and exits. Used to test the frozen app without hardware.
+"""
 from __future__ import annotations
 
+import json
 import logging
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from . import paths
+from . import __version__, paths
 from .config import load_config
 from .controller import AppController
+from .firstrun import ensure_first_run
 from .ui.main_window import MainWindow
 
 
+def _smoke(app: QApplication, win: MainWindow, ctl: AppController, created: list[str], out: str | None) -> int:
+    app.processEvents()
+    report = {
+        "version": __version__,
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "mode": ctl.config.mode,
+        "window_title": win.windowTitle(),
+        "banner_visible": not win.banner.isHidden(),
+        "auth_title": win.mode_title.text(),
+        "data_dir": str(paths.data_dir()),
+        "first_run_created": created,
+        "serial_started": ctl.manager.connected,
+    }
+    if out:
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2)
+    return 0
+
+
 def main() -> int:
-    paths.logs_dir().mkdir(parents=True, exist_ok=True)
+    argv = sys.argv[1:]
+    smoke = "--smoke" in argv
+    smoke_out = argv[argv.index("--smoke-out") + 1] if "--smoke-out" in argv else None
+    created = ensure_first_run()
     logging.basicConfig(filename=str(paths.logs_dir() / "hss.log"), level=logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv[:1])
     ctl = AppController(load_config())
     win = MainWindow(ctl)
     win.show()
+    if smoke:
+        return _smoke(app, win, ctl, created, smoke_out)
     ctl.start()
     app.aboutToQuit.connect(ctl.shutdown)
+    QTimer.singleShot(0, lambda: None)
     return app.exec()
 
 

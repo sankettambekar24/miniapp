@@ -1,24 +1,23 @@
 # PROJECT STATUS (resume from here)
-Date: 2026-11-03. Stages 1-3 done. **Stage 3 (Firmware) COMPLETE: compiled only, NOT flashed. Waiting for "proceed" to Stage 4.**
-Order: 2 Core (done) > 3 Firmware (done) > 4 Dashboards+SD > 5 Backend client > 6 Packaging.
+Date: 2026-11-03. Stages 1-5 done, Stage 6 groundwork done (installer built, dev-PC verified only). **Waiting for user: hardware tests, approvals, BACKUP CONFIRMED.**
 
-## Gates
-- **BLOCKED-ON-BACKUP:** `C:\mini project\HSS_Firmware_Backup\` does not exist (re-checked at Stage 3 start). No flashing, none proposed until you write "BACKUP CONFIRMED" and I re-verify hashes.
-- **Board UNRESOLVED:** your `Board:` line is still the placeholder. Compiled for F401CC Black Pill (sketch header, SKETCH-DERIVED).
-- STM32CubeProgrammer not installed (not in winget; manual st.com download).
+## Gates / blockers
+- BLOCKED-ON-BACKUP: `C:\mini project\HSS_Firmware_Backup\` missing. No flashing, none proposed until "BACKUP CONFIRMED" (then re-verify hashes).
+- Board unresolved (F401 assumed; do not flash an F405 with this binary). STM32CubeProgrammer not installed (manual st.com download).
+- Backend writes: none ever sent. Approval list in `tests/hardware/BACKEND_LIVE_TEST.md`; `tests/live/APPROVED_ENDPOINTS.txt` does not exist.
 
-## Stage 3 built
-- `firmware/hss_firmware/hss_firmware.ino` (+ `pins_local.example.h`; real `pins_local.h` git-ignored), `firmware/build.ps1`, `firmware/CHANGES_vs_BASE.diff` (PIN redacted), `firmware/BASE_SHA256.txt`, `firmware/README.md`
-- `docs/SERIAL_PROTOCOL.md`, `hss/core/protocol.py` additions, wire-ID mode in `hss/core/serial_manager.py`
-- `tests/unit/test_protocol_conformance.py` (28 checks), `tests/unit/test_wire_ids.py`; `tests/hardware/FIRMWARE_FLASH_AND_AUTH_TEST.md`, `tests/hardware/serial_capture.py`
-- Compile: FQBN `STMicroelectronics:stm32:GenF4:pnum=BLACKPILL_F401CC,usb=CDCgen,xserial=generic` + `-DENABLE_HWSERIAL2`, STM32duino core 3.0.0: PIN-only 66952 B bin (25% flash, 10% RAM), factors build 68152 B. Control: the unmodified base fails to link (`Serial2`) without that flag.
+## Built (all MOCK-TESTED unless stated)
+- Core: SerialManager (+`run_transaction`), PIN FSM, discovery, identity file, factors stubs; firmware working copy (compiled only).
+- Stage 4: `hss/ui/dashboards.py` (admin/user), `hss/ui/sd_page.py`, `hss/core/sd_ops.py`, `docs/SD_DESIGN.md`, `tests/unit/fake_firmware.py`.
+- Stage 5: `hss/backend/` + `docs/BACKEND_CLIENT.md`, `tests/live/run_live.py` (guarded).
+- Stage 6 groundwork: `hss.spec`, `installer/HSS.iss`, `build_release.ps1`, `hss/firstrun.py`, `release/HSS-Setup.exe` (unsigned; SHA-256 C757F660185B45492A1911CE304C54B2AA85B54C06EF64E258786659D74DF508), `tests/release/CLEAN_PC_CHECKLIST.md`, `docs/TEST_REPORT.md`.
 
 ## Test status
-MOCK-TESTED: 98 unit tests pass (`.venv\Scripts\python -m pytest`), incl. firmware-source <-> desktop <-> docs conformance. VERIFIED-HARDWARE: 0. Firmware behavior: SKETCH-DERIVED, compiled, never run. Stage 2 `PIN_AUTH_TEST.md` still awaiting your results.
+337 automated tests pass (docs/TEST_REPORT.md). VERIFIED-HARDWARE 0. VERIFIED-LIVE-API only Stage 1 read-only observations.
 
-## How to run / test
-- Tests: `.venv\Scripts\python -m pytest`; build firmware: `powershell firmwareuild.ps1` (never flashes)
-- App: `.venv\Scripts\pythonw.exe -m hss` (config per `tests/hardware/PIN_AUTH_TEST.md`)
+## How to run
+- Tests: `.venv\Scripts\python -m pytest`. Release: `powershell build_release.ps1`. Firmware compile: `powershell firmwareuild.ps1`.
+- App: `.venv\Scripts\pythonw.exe -m hss` (test mode needs `%LOCALAPPDATA%\HSS\config.json` {"mode":"pin_test"}; templates are copied there on first run).
 
 ## Next (user)
-1. Fill the firmware backup (FLASH_BACKUP.md), tell me the board, write "BACKUP CONFIRMED". 2. Install STM32CubeProgrammer. 3. Run FIRMWARE_FLASH_AND_AUTH_TEST.md and paste logs. 4. "proceed" to Stage 4.
+1. Backup + "BACKUP CONFIRMED"; 2. run hardware scripts (PIN_AUTH_TEST, FIRMWARE_FLASH_AND_AUTH_TEST, SD_TEST); 3. reply to the backend approval list; 4. clean-PC checklist. Then final TEST_REPORT update.

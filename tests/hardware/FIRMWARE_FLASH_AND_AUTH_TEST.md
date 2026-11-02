@@ -12,6 +12,8 @@ Evidence folder: `C:\mini project\HSS_Complete_Desktop\tests\evidence\hardware\f
 - FQBN: `STMicroelectronics:stm32:GenF4:pnum=BLACKPILL_F401CC,usb=CDCgen,xserial=generic` (+ `-DENABLE_HWSERIAL2`, see `firmware/build.ps1`), STM32duino core 3.0.0, Arduino CLI 1.5.1.
 - PIN-only binary: `firmware\build\hss_firmware.ino.bin`, 66952 bytes, SHA-256 `423686A0143C6AA15B7AF5BA1E7802BA125FAE33795ECFC982F9768AC21EEE43` (check with `Get-FileHash`).
 - Test PINs are in `firmware\hss_firmware\pins_local.h` (git-ignored, random, generated on this PC): `HSS_PIN_SLOT1` = slot 1 admin test, `HSS_PIN_SLOT2` = slot 2 user test. To change them: edit that file, then run `powershell firmware\build.ps1`, and flash the new `.bin`.
+- AS608 pins: UNVERIFIED and inactive in the PIN-only build (user decision 2026-11-03).
+- Flash method: SWD with the ST-Link via STM32CubeProgrammer (user decision 2026-11-03).
 - Fingerprint UART (`Serial2`): the base sketch never sets its pins; this build uses the core's default USART2 pins (probably PA2/PA3, UNVERIFIED). Wire the AS608 only if you need it; in this PIN-only build a missing sensor is not fatal.
 
 ## Part 1 - Flash (needs STM32CubeProgrammer, which you install; it is not in winget)

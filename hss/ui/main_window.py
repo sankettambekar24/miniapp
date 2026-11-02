@@ -5,7 +5,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
                                QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
+from PySide6.QtWidgets import QTabWidget
+
 from ..controller import AppController
+from .dashboards import Ctx, build_dashboard
+from .sd_page import make_sd_page
 from ..core.auth_fsm import PRODUCTION_MESSAGE, AuthState
 from ..factors.base import FACE, FINGERPRINT
 from .qt_bridge import QtBridge
@@ -47,8 +51,13 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         body.addWidget(self.stack, 1)
         self.stack.addWidget(self._build_auth_page())
-        self.stack.addWidget(self._placeholder("Admin dashboard", "Stage 4: user/device/file/permission management and SD operations."))
-        self.stack.addWidget(self._placeholder("User dashboard", "Stage 4: file access and SD operations."))
+        self.session_info: list = []
+        self.admin_host, self.user_host = QWidget(), QWidget()
+        for host in (self.admin_host, self.user_host):
+            QVBoxLayout(host).setContentsMargins(0, 0, 0, 0)
+            self.stack.addWidget(host)
+        self.dash: QTabWidget | None = None   # built per PIN session, destroyed on any lock
+        self.dash_ctx: Ctx | None = None
         self.log_view = QPlainTextEdit(readOnly=True)
         self.stack.addWidget(self.log_view)
 
@@ -133,6 +142,25 @@ class MainWindow(QMainWindow):
         if not res.ok:
             self.state_label.setText(res.message)
 
+    def _sync_dashboard(self) -> None:
+        """Build the role dashboard for an active PIN session; destroy it (and any backend state) on any lock."""
+        ident = self.ctl.session.identity
+        active = self.ctl.fsm.state is AuthState.SESSION_ACTIVE and ident is not None
+        if not active:
+            if self.dash is not None:
+                self.dash.setParent(None)
+                self.dash.deleteLater()
+                self.dash, self.dash_ctx = None, None
+            return
+        if self.dash is None or self.dash_role != ident.role:
+            host = self.admin_host if ident.role == "admin" else self.user_host
+            self.dash_ctx = Ctx(self.ctl)
+            self.dash = build_dashboard(self.dash_ctx, ident.role, make_sd_page)
+            self.dash_role = ident.role
+            host.layout().addWidget(self.dash)
+
+    dash_role: str | None = None
+
     def _append_log(self, text: str) -> None:
         self.log_view.appendPlainText(text)
 
@@ -155,8 +183,7 @@ class MainWindow(QMainWindow):
             ok = self._allowed(row)
             item.setFlags(item.flags() | Qt.ItemIsEnabled if ok else item.flags() & ~Qt.ItemIsEnabled)
             item.setToolTip("" if ok else "Requires an authenticated session with the matching role")
-        for lbl in self.session_info:
-            lbl.setText(f"Signed in: {ident.name} (role {ident.role})" if ident else "")
+        self._sync_dashboard()
         if fsm.state is AuthState.SESSION_ACTIVE and ident:
             self.sidebar.setCurrentRow(PAGE_ADMIN if ident.role == "admin" else PAGE_USER)
         elif self.stack.currentIndex() in (PAGE_ADMIN, PAGE_USER):

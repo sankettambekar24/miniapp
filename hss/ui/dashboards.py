@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
 
 from ..backend import BackendError
 from ..controller import AppController
+from ..core.sd_policy import check_83_safe
 from .async_util import Runner
 
 SIGN_IN_REASON = "Sign in to the backend first (Backend tab)."
@@ -50,7 +51,8 @@ class Ctx(QObject):
 
         def ok(idx):
             self.ctl.grants = idx
-            say(f"Permissions loaded for {len(idx)} file(s).")
+            warn = f" WARNING: {len(idx.warnings)} backend name(s) are not 8.3-safe and cannot match SD files." if idx.warnings else ""
+            say(f"Permissions loaded for {len(idx)} file(s).{warn}")
             self.backend_changed.emit()
 
         def err(e):
@@ -462,8 +464,17 @@ def _files_tab(ctx: Ctx, admin: bool) -> ListTab:
             t.do(lambda: ctx.client.create_grant(fid, v["s"], v["p"]), "Grant created.")
 
     def add(tab, _row):
-        v = ask_fields(tab, "Add file metadata", [("o", "Owner user id", "text"), ("n", "Display name", "text")])
+        v = ask_fields(tab, "Add file metadata", [("o", "Owner user id", "text"),
+                                                  ("n", "Display name (must equal the SD path, 8.3 e.g. HSSTEST1.TXT)", "text")])
         if v and v["o"] and v["n"]:
+            why = check_83_safe(v["n"])
+            if why and QMessageBox.warning(
+                    tab, "Name is not 8.3-safe",
+                    f"{why}\n\nThe backend display name must equal the SD path, and SD short names are 8.3 "
+                    "(e.g. HSSTEST1.TXT). A file with this name cannot match an SD file, so users would never "
+                    "see or download it.\n\nCreate it anyway?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                return
             tab.do(lambda: ctx.client.create_file_metadata(v["o"], v["n"]), "File metadata created.")
 
     acts = [Action("Grants...", grants)]

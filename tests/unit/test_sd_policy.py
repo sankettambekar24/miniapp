@@ -4,7 +4,7 @@ import pytest
 
 from hss.backend import NotFound, Page
 from hss.core.sd_ops import SdErrorCode
-from hss.core.sd_policy import GrantIndex, SdPolicy
+from hss.core.sd_policy import GrantIndex, SdPolicy, check_83_safe
 
 from sd_rig import SdRig
 
@@ -109,3 +109,36 @@ def test_grant_index_build_maps_list_and_read():
     assert idx.perms == {"a.txt": frozenset({"LIST", "READ"}), "b.txt": frozenset({"LIST"}),
                          "c.txt": frozenset({"LIST", "READ"})}
     assert all(name in ("list_files", "get_file") for name, _ in c.calls)  # read-only GETs only
+
+
+# ---- 8.3 convention (user-confirmed): backend display_name == SD path, 8.3-safe names ----
+@pytest.mark.parametrize("name", ["HSSTEST1.TXT", "a.txt", "README", "DIR/FILE.BIN", "A_B-C.D", "X~1.TXT"])
+def test_83_safe_names_pass(name):
+    assert check_83_safe(name) is None
+
+
+@pytest.mark.parametrize("name,frag", [
+    ("", "empty"), ("   ", "empty"), ("toolongname.txt", "8"), ("a.html", "3"), ("a b.txt", "not allowed"),
+    ("a.b.c", "more than one dot"), ("a.", "empty extension"), ("DIR//F.TXT", "empty path segment"),
+    ("hsstest_0102030405_file.txt", "8"), ("caf\u00e9.txt", "not allowed"), ("a:b.txt", "not allowed"),
+])
+def test_non_83_names_warn(name, frag):
+    why = check_83_safe(name)
+    assert why and frag in why
+
+
+def test_match_is_case_insensitive_like_fat(tmp_path):
+    idx = GrantIndex({"hsstest1.txt": frozenset({"LIST", "READ"})})
+    pol = SdPolicy(lambda: "user", lambda: idx)
+    assert pol.can("HSSTEST1.TXT", "READ") and pol.can("HsStEsT1.TxT", "LIST")
+    assert not pol.can("HSSTEST2.TXT", "READ")
+
+
+def test_grant_index_build_collects_83_warnings():
+    class C(FakeClient):
+        def list_files(self, page=None):
+            return Page([{"id": "1", "display_name": "HSSTEST1.TXT"}, {"id": "2", "display_name": "long file name.txt"}],
+                        2, None, None)
+
+    idx = GrantIndex.build(C())
+    assert len(idx) == 2 and len(idx.warnings) == 1 and "long file name.txt" in idx.warnings[0]

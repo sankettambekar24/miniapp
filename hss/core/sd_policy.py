@@ -21,15 +21,46 @@ from __future__ import annotations
 from typing import Callable
 
 LIST, READ = "LIST", "READ"
+_SHORT_OK = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'()-@^_`{}~")
 MAX_FILES = 500
+
+
+def check_83_safe(name: str) -> str | None:
+    """Convention (user-confirmed 2026-11-03): backend display_name == SD path, using FAT 8.3-safe names such as
+    HSSTEST1.TXT. Returns a human-readable WARNING if `name` cannot match a short-name SD file, else None.
+    Each '/'-separated segment must be 1-8 base chars + optional '.' + 1-3 extension chars from the short-name
+    set (no spaces, no extra dots). Comparison with SD listings is case-insensitive (FAT)."""
+    if not name or not name.strip():
+        return "empty name"
+    for seg in name.split("/"):
+        if not seg:
+            return "empty path segment"
+        if seg.count(".") > 1:
+            return f"segment {seg!r} has more than one dot"
+        base, _, ext = seg.partition(".")
+        if "." in seg and not ext:
+            return f"segment {seg!r} has an empty extension"
+        if not 1 <= len(base) <= 8:
+            return f"segment {seg!r}: base name must be 1-8 characters (8.3)"
+        if len(ext) > 3:
+            return f"segment {seg!r}: extension must be at most 3 characters (8.3)"
+        bad = sorted({c for c in seg.replace(".", "") if c not in _SHORT_OK})
+        if bad:
+            return f"segment {seg!r} contains characters not allowed in 8.3 names: {''.join(bad)!r}"
+    return None
 MAX_PAGES = 50
 
 
 class GrantIndex:
     """display_name (== SD path) -> set of permissions the signed-in backend user holds."""
 
-    def __init__(self, perms: dict[str, frozenset[str]] | None = None):
+    def __init__(self, perms: dict[str, frozenset[str]] | None = None, warnings: list[str] | None = None):
         self.perms = dict(perms or {})
+        self._ci = {k.upper(): v for k, v in self.perms.items()}  # FAT is case-insensitive
+        self.warnings = list(warnings or [])  # backend names that are not 8.3-safe (cannot match SD files)
+
+    def lookup(self, path: str) -> frozenset[str]:
+        return self._ci.get(path.upper(), frozenset())
 
     def __len__(self) -> int:
         return len(self.perms)
@@ -47,10 +78,14 @@ class GrantIndex:
                 break
             page = (page or 1) + 1
         perms: dict[str, frozenset[str]] = {}
+        warnings: list[str] = []
         for rec in records[:MAX_FILES]:
             name, fid = rec.get("display_name"), rec.get("id")
             if not name or not fid:
                 continue
+            why = check_83_safe(str(name))
+            if why:
+                warnings.append(f"{name!r}: {why}")
             have = {LIST}  # it appeared in the caller's own listing
             try:
                 client.get_file(str(fid))
@@ -58,7 +93,7 @@ class GrantIndex:
             except NotFound:
                 pass
             perms[str(name)] = frozenset(have)
-        return cls(perms)
+        return cls(perms, warnings)
 
 
 class SdPolicy:
@@ -92,7 +127,7 @@ class SdPolicy:
         if r != "user":
             return False
         idx = self._grants()
-        return idx is not None and permission in idx.perms.get(path, frozenset())
+        return idx is not None and permission in idx.lookup(path)
 
     def download_block_reason(self, path: str) -> str | None:
         r = self.role

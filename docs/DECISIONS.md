@@ -47,6 +47,9 @@
 26. **Backend writes:** user approved items 1-5, NOT 6, gated on the user's confirmation of the read-only part and the user's own interactive admin login (Claude cannot supply credentials). Staged as `tests/live/APPROVED_ENDPOINTS.pending.txt` (ignored by the harness); the armed filename is git-ignored. The harness now saves each redacted response body/status. No write has been made.
 27. **Installer rebuilt** after the policy change; still unsigned and unverified on other PCs.
 
+28. **Name convention CONFIRMED by user (2026-11-03):** backend `display_name` == SD path, and names are FAT 8.3-safe (e.g. `HSSTEST1.TXT`; base 1-8 + optional 1-3 extension, no spaces/extra dots; each `/` segment checked). Matching against SD listings is case-insensitive (FAT). Enforcement: `check_83_safe()` in `hss/core/sd_policy.py`; the Add-file-metadata dialog warns and asks before creating a non-8.3 name; `GrantIndex.build` collects a warning per non-8.3 backend name (shown after permissions load) because such a record can never match an SD file. Not a hard block: the user may still create it.
+29. **Live write run armed (2026-11-03, user: PART A PASSED, ARM WRITES 1-5):** `tests/live/APPROVED_ENDPOINTS.txt` created from the pending file (git-ignored; items 1-5 only, item 6 excluded). NOTE: no Part A evidence JSON was present in `tests/evidence/live/` when arming; the write run repeats login/me/lists and saves its own evidence. The harness's test file record is named `hsstest_<mmddhhmmss><rand>_file.txt` (the approved `hsstest_` prefix) and is a metadata-only record, so it intentionally violates the 8.3 convention and will not match any SD file.
+
 ## OPEN QUESTIONS
 - Board model (F401 Black Pill vs F405 Feather): the message contained the placeholder text, not an answer.
 - Backup folder missing; Stage 3 cannot start until it exists and hashes verify.
@@ -57,4 +60,3 @@
 - Which physical pins does the fingerprint UART use on your wiring? (build uses core USART2 defaults)
 - Approve (or edit) the 6 backend write endpoints listed in the stop-gate report / BACKEND_LIVE_TEST.md.
 - Backend live: run Part A and report; then say ARM WRITES (items 1-5 only) and run the write step yourself with your admin login.
-- Confirm the convention backend display_name == SD path (item 25), or specify another mapping.

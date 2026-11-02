@@ -56,3 +56,11 @@ replayed, other methods raise Unauthorized (refresh already done, user may repea
 ## Backend limitations (UI features BLOCKED)
 Hardware-verified login/session (complete never succeeds, factors stored verified=false), file content download/upload
 (503 by design), offline policy issuance (503), hardware-only login (JWT only via password).
+
+
+## File naming convention: backend `display_name` == SD path (user-confirmed 2026-11-03)
+The backend stores file METADATA only and has no path concept (`storage/services.py`; file content is always 503). The app links a backend file record to a physical SD file by name:
+- `display_name` must EQUAL the SD relative path, using FAT 8.3-safe names, e.g. `HSSTEST1.TXT` (each `/` segment: base 1-8 chars, optional `.` + 1-3 chars, characters `A-Z 0-9 ! # $ % & ' ( ) - @ ^ _ \` { } ~`, no spaces, one dot). Case is ignored when matching (FAT).
+- Used by `hss/core/sd_policy.py`: for a USER, LIST = the record appears in their `GET /files/`; READ = `GET /files/{id}/` succeeds. SD files without a matching record are invisible and not downloadable to a USER. ADMIN is unaffected.
+- `check_83_safe(name)` returns a warning for non-conforming names. The UI warns (and asks) when you create such a record; `GrantIndex.build` reports how many existing backend names are non-8.3 and therefore can never match.
+- Status: source-derived mapping, IMPLEMENTED-UNTESTED live; the policy logic is MOCK-TESTED (`tests/unit/test_sd_policy.py`).

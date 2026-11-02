@@ -1,0 +1,355 @@
+{
+  "mode": "write",
+  "base_url": "https://mini-backend-z8dr.onrender.com",
+  "steps": [
+    {
+      "step": "health_live",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:17",
+        "outcome": "success",
+        "body": {
+          "status": "ok",
+          "service": "hybrid-secure-storage-backend"
+        }
+      }
+    },
+    {
+      "step": "health_ready",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:20",
+        "outcome": "success",
+        "body": {
+          "status": "ok",
+          "database": "ok",
+          "cache": "ok"
+        }
+      }
+    },
+    {
+      "step": "unauth_me_expect_401",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:21",
+        "outcome": "error",
+        "error": "Unauthorized",
+        "status": 401,
+        "code": "NOT_AUTHENTICATED",
+        "request_id": "c6a9d931-6345-4de3-a7fc-b36db3a15549"
+      }
+    },
+    {
+      "step": "unauth_list_devices_expect_401",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:22",
+        "outcome": "error",
+        "error": "Unauthorized",
+        "status": 401,
+        "code": "NOT_AUTHENTICATED",
+        "request_id": "5405f10c-aea8-4002-8439-e4f4054c51fb"
+      }
+    },
+    {
+      "step": "unauth_list_files_expect_401",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:22",
+        "outcome": "error",
+        "error": "Unauthorized",
+        "status": 401,
+        "code": "NOT_AUTHENTICATED",
+        "request_id": "9a36e340-966d-43d0-8d78-373a774fef2c"
+      }
+    },
+    {
+      "step": "unauth_list_offline_policies_expect_401",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:23",
+        "outcome": "error",
+        "error": "Unauthorized",
+        "status": 401,
+        "code": "NOT_AUTHENTICATED",
+        "request_id": "cc2960db-4488-43f1-bb75-7f64c8168aca"
+      }
+    },
+    {
+      "step": "unauth_list_audit_events_expect_401",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:23",
+        "outcome": "error",
+        "error": "Unauthorized",
+        "status": 401,
+        "code": "NOT_AUTHENTICATED",
+        "request_id": "1469ad5b-75c2-4c76-933a-154d2bb33cf4"
+      }
+    },
+    {
+      "step": "unauth_list_users_expect_401",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:24",
+        "outcome": "error",
+        "error": "Unauthorized",
+        "status": 401,
+        "code": "NOT_AUTHENTICATED",
+        "request_id": "c00c85d0-7f53-49bb-8182-620c56193200"
+      }
+    },
+    {
+      "step": "unauth_file_content_expect_401",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:24",
+        "outcome": "error",
+        "error": "Unauthorized",
+        "status": 401,
+        "code": "NOT_AUTHENTICATED",
+        "request_id": "4399a68b-9906-44cb-b4f3-bd5575fba4d6"
+      }
+    },
+    {
+      "step": "login",
+      "ok": true,
+      "detail": {
+        "role": "ADMIN"
+      }
+    },
+    {
+      "step": "me",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:57",
+        "outcome": "success",
+        "body": {
+          "id": "cdffc3b2-f471-4dce-945e-fa054f0905c2",
+          "username": "admin",
+          "role": "ADMIN",
+          "is_active": true,
+          "created_at": "2026-10-31T08:26:07.494191Z",
+          "last_login_at": null
+        }
+      }
+    },
+    {
+      "step": "list_devices",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:58",
+        "outcome": "success",
+        "body": {
+          "count": 0,
+          "rows": 0
+        }
+      }
+    },
+    {
+      "step": "list_files",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:59",
+        "outcome": "success",
+        "body": {
+          "count": 0,
+          "rows": 0
+        }
+      }
+    },
+    {
+      "step": "list_offline_policies",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:44:59",
+        "outcome": "success",
+        "body": {
+          "count": 0,
+          "rows": 0
+        }
+      }
+    },
+    {
+      "step": "list_users",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:00",
+        "outcome": "success",
+        "body": {
+          "count": 2,
+          "rows": 2
+        }
+      }
+    },
+    {
+      "step": "list_audit_events",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:01",
+        "outcome": "success",
+        "body": {
+          "count": 12,
+          "rows": 12
+        }
+      }
+    },
+    {
+      "step": "create_user",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:04",
+        "outcome": "success",
+        "body": {
+          "id": "4095a4aa-1c4a-4247-959a-45c14330a942",
+          "username": "hsstest_11030345010b4e_u",
+          "role": "USER",
+          "is_active": true,
+          "created_at": "2026-11-02T22:15:02.911862Z"
+        }
+      }
+    },
+    {
+      "step": "create_device",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:05",
+        "outcome": "success",
+        "body": {
+          "id": "367c71d8-50c7-4e7f-9496-4ca42531002f",
+          "device_label": "hsstest_11030345010b4e_dev",
+          "device_public_id": "hsstest_11030345010b4e_pub",
+          "protocol_version": "1",
+          "owner_user": null,
+          "status": "PENDING"
+        }
+      }
+    },
+    {
+      "step": "device_status_ACTIVE",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:06",
+        "outcome": "success",
+        "body": {
+          "id": "367c71d8-50c7-4e7f-9496-4ca42531002f",
+          "device_label": "hsstest_11030345010b4e_dev",
+          "device_public_id": "hsstest_11030345010b4e_pub",
+          "owner_user_id": null,
+          "status": "ACTIVE",
+          "protocol_version": "1",
+          "last_seen_at": null,
+          "created_at": "2026-11-02T22:15:05.543037Z",
+          "updated_at": "2026-11-02T22:15:06.490312Z",
+          "revoked_at": null
+        }
+      }
+    },
+    {
+      "step": "create_file_metadata",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:07",
+        "outcome": "success",
+        "body": {
+          "id": "f19e4d7d-cedc-4fad-a7c9-024efea9cb47",
+          "owner_user_id": "4095a4aa-1c4a-4247-959a-45c14330a942",
+          "display_name": "hsstest_11030345010b4e_file.txt",
+          "size_bytes": 0,
+          "encryption_format_version": 0,
+          "created_at": "2026-11-02T22:15:07.441513Z",
+          "updated_at": "2026-11-02T22:15:07.441848Z",
+          "content_available": false
+        }
+      }
+    },
+    {
+      "step": "create_grant",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:09",
+        "outcome": "success",
+        "body": {
+          "id": "f4f9f90c-ffa7-490c-bfea-231aaf167c23",
+          "subject_user_id": "4095a4aa-1c4a-4247-959a-45c14330a942",
+          "granted_by_user_id": "cdffc3b2-f471-4dce-945e-fa054f0905c2",
+          "permission": "LIST",
+          "created_at": "2026-11-02T22:15:08.711049Z",
+          "expires_at": null,
+          "revoked_at": null,
+          "active": true
+        }
+      }
+    },
+    {
+      "step": "cleanup_revoke_grant",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:10",
+        "outcome": "success",
+        "body": {
+          "id": "f4f9f90c-ffa7-490c-bfea-231aaf167c23",
+          "subject_user_id": "4095a4aa-1c4a-4247-959a-45c14330a942",
+          "granted_by_user_id": "cdffc3b2-f471-4dce-945e-fa054f0905c2",
+          "permission": "LIST",
+          "created_at": "2026-11-02T22:15:08.711049Z",
+          "expires_at": null,
+          "revoked_at": "2026-11-02T22:15:09.773858Z",
+          "active": false
+        }
+      }
+    },
+    {
+      "step": "cleanup_device_revoked",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:11",
+        "outcome": "success",
+        "body": {
+          "id": "367c71d8-50c7-4e7f-9496-4ca42531002f",
+          "device_label": "hsstest_11030345010b4e_dev",
+          "device_public_id": "hsstest_11030345010b4e_pub",
+          "owner_user_id": null,
+          "status": "REVOKED",
+          "protocol_version": "1",
+          "last_seen_at": null,
+          "created_at": "2026-11-02T22:15:05.543037Z",
+          "updated_at": "2026-11-02T22:15:10.682280Z",
+          "revoked_at": "2026-11-02T22:15:10.682121Z"
+        }
+      }
+    },
+    {
+      "step": "cleanup_disable_user",
+      "ok": true,
+      "detail": {
+        "ts": "2026-11-03T03:45:11",
+        "outcome": "success",
+        "body": {
+          "id": "4095a4aa-1c4a-4247-959a-45c14330a942",
+          "is_active": false
+        }
+      }
+    },
+    {
+      "step": "created_ids",
+      "detail": {
+        "user": "4095a4aa-1c4a-4247-959a-45c14330a942",
+        "device": "367c71d8-50c7-4e7f-9496-4ca42531002f",
+        "file": "f19e4d7d-cedc-4fad-a7c9-024efea9cb47",
+        "grant": "f4f9f90c-ffa7-490c-bfea-231aaf167c23"
+      },
+      "cannot_remove": [
+        "user hsstest_11030345010b4e_u remains (disabled): the API has no user DELETE",
+        "device hsstest_11030345010b4e_dev remains (status REVOKED, terminal): no device DELETE",
+        "file metadata hsstest_11030345010b4e_file.txt remains: no file DELETE route",
+        "grant row remains (revoked): no grant DELETE"
+      ]
+    },
+    {
+      "step": "logout",
+      "ok": true,
+      "detail": null
+    }
+  ]
+}

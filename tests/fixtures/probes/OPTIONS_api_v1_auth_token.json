@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-11-02T19:36:56.9310459Z",
+  "method": "OPTIONS",
+  "url": "https://mini-backend-z8dr.onrender.com/api/v1/auth/token/",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "allow": "POST, OPTIONS",
+    "rndr-id": "16cdb39d-bbc1-4468",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "deb7d0d3-544d-43dd-9584-a6f8695d03f5",
+    "cf-ray": "a545973babd84081-BOM"
+  },
+  "body": "{\"name\":\"Login\",\"description\":\"POST /api/v1/auth/token/\\n\\nReturns access + refresh tokens. Rate-limited by IP and username.\\nInactive accounts are rejected by Simple JWT via the default\\nuser_can_authenticate check.\",\"renders\":[\"application/json\"],\"parses\":[\"application/json\",\"application/x-www-form-urlencoded\",\"multipart/form-data\"],\"actions\":{\"POST\":{\"username\":{\"type\":\"string\",\"required\":true,\"read_only\":false,\"label\":\"Username\"},\"password\":{\"type\":\"string\",\"required\":true,\"read_only\":false,\"label\":\"Password\"}}}}",
+  "body_json": {
+    "name": "Login",
+    "description": "POST /api/v1/auth/token/\n\nReturns access + refresh tokens. Rate-limited by IP and username.\nInactive accounts are rejected by Simple JWT via the default\nuser_can_authenticate check.",
+    "renders": [
+      "application/json"
+    ],
+    "parses": [
+      "application/json",
+      "application/x-www-form-urlencoded",
+      "multipart/form-data"
+    ],
+    "actions": {
+      "POST": {
+        "username": {
+          "type": "string",
+          "required": true,
+          "read_only": false,
+          "label": "Username"
+        },
+        "password": {
+          "type": "string",
+          "required": true,
+          "read_only": false,
+          "label": "Password"
+        }
+      }
+    }
+  }
+}

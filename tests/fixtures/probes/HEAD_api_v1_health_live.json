@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-11-02T19:36:30.7630465Z",
+  "method": "HEAD",
+  "url": "https://mini-backend-z8dr.onrender.com/api/v1/health/live/",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "allow": "GET, HEAD, OPTIONS",
+    "rndr-id": "4db2a060-9ff2-418d",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "34da876b-da7b-4521-a2f6-6c48ee9ceb34",
+    "cf-ray": "a545969aff0d2698-BOM"
+  },
+  "body": "HTTP/1.1 200 OK\r\nDate: Mon, 02 Nov 2026 19:36:28 GMT\r\nContent-Type: application/json\r\nConnection: keep-alive\r\nallow: GET, HEAD, OPTIONS\r\ncross-origin-opener-policy: same-origin\r\nreferrer-policy: same-origin\r\nrndr-id: 4db2a060-9ff2-418d\r\nServer: cloudflare\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nvary: origin\r\nvary: Accept-Encoding\r\nx-content-type-options: nosniff\r\nx-frame-options: DENY\r\nx-render-origin-server: gunicorn\r\nx-request-id: 34da876b-da7b-4521-a2f6-6c48ee9ceb34\r\ncf-cache-status: DYNAMIC\r\nCF-RAY: a545969aff0d2698-BOM\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
+  "body_json": null
+}

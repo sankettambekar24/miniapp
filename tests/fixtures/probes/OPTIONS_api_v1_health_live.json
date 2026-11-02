@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-11-02T19:36:35.8877707Z",
+  "method": "OPTIONS",
+  "url": "https://mini-backend-z8dr.onrender.com/api/v1/health/live/",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "allow": "GET, HEAD, OPTIONS",
+    "rndr-id": "aa678d34-339f-4000",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "9cfc7713-86ed-4a10-ae14-23387670d300",
+    "cf-ray": "a54596bb3b05520a-BOM"
+  },
+  "body": "{\"name\":\"Liveness\",\"description\":\"GET /api/v1/health/live/ \u2014 process is alive. No secrets, no DB.\",\"renders\":[\"application/json\"],\"parses\":[\"application/json\",\"application/x-www-form-urlencoded\",\"multipart/form-data\"]}",
+  "body_json": {
+    "name": "Liveness",
+    "description": "GET /api/v1/health/live/ \u2014 process is alive. No secrets, no DB.",
+    "renders": [
+      "application/json"
+    ],
+    "parses": [
+      "application/json",
+      "application/x-www-form-urlencoded",
+      "multipart/form-data"
+    ]
+  }
+}

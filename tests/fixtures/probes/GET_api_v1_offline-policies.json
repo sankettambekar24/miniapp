@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-11-02T19:38:10.8360420Z",
+  "method": "GET",
+  "url": "https://mini-backend-z8dr.onrender.com/api/v1/offline-policies/",
+  "status": 401,
+  "headers": {
+    "content-type": "application/json",
+    "allow": "GET, POST, HEAD, OPTIONS",
+    "rndr-id": "76bc60d8-6e12-40c4",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "www-authenticate": "Bearer realm=\"api\"",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "f693a60f-c79c-4366-9b94-718201a646db",
+    "cf-ray": "a5459908aaf6bdd5-BOM"
+  },
+  "body": "{\"error\":{\"code\":\"NOT_AUTHENTICATED\",\"message\":\"Authentication credentials were not provided.\",\"request_id\":\"f693a60f-c79c-4366-9b94-718201a646db\"}}",
+  "body_json": {
+    "error": {
+      "code": "NOT_AUTHENTICATED",
+      "message": "Authentication credentials were not provided.",
+      "request_id": "f693a60f-c79c-4366-9b94-718201a646db"
+    }
+  }
+}

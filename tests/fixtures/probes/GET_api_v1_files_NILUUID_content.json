@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-11-02T19:37:59.9742586Z",
+  "method": "GET",
+  "url": "https://mini-backend-z8dr.onrender.com/api/v1/files/00000000-0000-0000-0000-000000000000/content/",
+  "status": 401,
+  "headers": {
+    "content-type": "application/json",
+    "allow": "GET, HEAD, OPTIONS",
+    "rndr-id": "4f3a8f80-c135-4fa5",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "www-authenticate": "Bearer realm=\"api\"",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "41dec0b4-797f-4222-a725-d8cdd5ba5a22",
+    "cf-ray": "a54598c86d116efe-BOM"
+  },
+  "body": "{\"error\":{\"code\":\"NOT_AUTHENTICATED\",\"message\":\"Authentication credentials were not provided.\",\"request_id\":\"41dec0b4-797f-4222-a725-d8cdd5ba5a22\"}}",
+  "body_json": {
+    "error": {
+      "code": "NOT_AUTHENTICATED",
+      "message": "Authentication credentials were not provided.",
+      "request_id": "41dec0b4-797f-4222-a725-d8cdd5ba5a22"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-11-02T19:36:25.6092618Z",
+  "method": "GET",
+  "url": "https://mini-backend-z8dr.onrender.com/api/v1/health/live/",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "allow": "GET, HEAD, OPTIONS",
+    "rndr-id": "5c6f17fb-0b06-46cc",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "9f2c210f-63e5-4933-ba01-8688daffd118",
+    "cf-ray": "a5459677ad4e3aab-BOM"
+  },
+  "body": "{\"status\":\"ok\",\"service\":\"hybrid-secure-storage-backend\"}",
+  "body_json": {
+    "status": "ok",
+    "service": "hybrid-secure-storage-backend"
+  }
+}

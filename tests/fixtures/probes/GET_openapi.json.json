@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-11-02T19:38:56.4675118Z",
+  "method": "GET",
+  "url": "https://mini-backend-z8dr.onrender.com/openapi.json",
+  "status": 404,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "rndr-id": "b732428f-7358-42ed",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "016467b0-8f0c-4fe4-9eae-c63366a66b62",
+    "cf-ray": "a5459a295a08b895-BOM"
+  },
+  "body": "\n<!doctype html>\n<html lang=\"en\">\n<head>\n  <title>Not Found</title>\n</head>\n<body>\n  <h1>Not Found</h1><p>The requested resource was not found on this server.</p>\n</body>\n</html>\n",
+  "body_json": null
+}

@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-11-02T19:36:41.0561481Z",
+  "method": "GET",
+  "url": "https://mini-backend-z8dr.onrender.com/api/v1/health/ready/",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "allow": "GET, HEAD, OPTIONS",
+    "rndr-id": "f2aca5fa-050f-4895",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "4c4602ea-8101-4d37-9e7a-3a9953ccea95",
+    "cf-ray": "a54596d9fbff3b3d-BOM"
+  },
+  "body": "{\"status\":\"ok\",\"database\":\"ok\",\"cache\":\"ok\"}",
+  "body_json": {
+    "status": "ok",
+    "database": "ok",
+    "cache": "ok"
+  }
+}

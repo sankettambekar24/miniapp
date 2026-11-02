@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-11-02T19:36:51.1607597Z",
+  "method": "GET",
+  "url": "https://mini-backend-z8dr.onrender.com/api/v1/auth/token/",
+  "status": 405,
+  "headers": {
+    "content-type": "application/json",
+    "allow": "POST, OPTIONS",
+    "rndr-id": "d82f920d-dc71-4165",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-render-origin-server": "gunicorn",
+    "x-request-id": "59b70fdc-470d-401a-866b-7094af3c7985",
+    "cf-ray": "a545971a9ee5c795-BOM"
+  },
+  "body": "{\"error\":{\"code\":\"METHOD_NOT_ALLOWED\",\"message\":\"Method \\\"GET\\\" not allowed.\",\"request_id\":\"59b70fdc-470d-401a-866b-7094af3c7985\"}}",
+  "body_json": {
+    "error": {
+      "code": "METHOD_NOT_ALLOWED",
+      "message": "Method \"GET\" not allowed.",
+      "request_id": "59b70fdc-470d-401a-866b-7094af3c7985"
+    }
+  }
+}

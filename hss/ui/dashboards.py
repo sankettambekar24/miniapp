@@ -39,6 +39,27 @@ class Ctx(QObject):
     def client(self):
         return self.ctl.backend
 
+    def load_grants(self, on_status: Callable[[str], None] | None = None) -> None:
+        """Build the USER permission index from read-only backend GETs (see hss/core/sd_policy.py)."""
+        from ..core.sd_policy import GrantIndex
+        c = self.ctl.backend
+        if not c or not c.is_authenticated:
+            return
+        say = on_status or (lambda _m: None)
+        say("Loading file permissions from the backend ...")
+
+        def ok(idx):
+            self.ctl.grants = idx
+            say(f"Permissions loaded for {len(idx)} file(s).")
+            self.backend_changed.emit()
+
+        def err(e):
+            self.ctl.grants = None
+            say(f"Could not load permissions: {type(e).__name__}: {e}")
+            self.backend_changed.emit()
+
+        self.runner.run(lambda: GrantIndex.build(c), ok, err)
+
     @property
     def signed_in(self) -> bool:
         c = self.ctl.backend
@@ -299,6 +320,8 @@ class BackendPanel(QWidget):
 
         def ok(_u):
             self.ctx.backend_changed.emit()
+            if self.ctx.ctl.session.identity and self.ctx.ctl.session.identity.role == "user":
+                self.ctx.load_grants(self.status.setText)  # USER SD access depends on these permissions
 
         self.ctx.runner.run(lambda: c.login(user, pw), ok, failed)
 
@@ -310,6 +333,7 @@ class BackendPanel(QWidget):
 
         def done(*_):
             self.ctx.ctl.backend = None
+            self.ctx.ctl.grants = None
             self.status.setText("Signed out (local tokens cleared).")
             self.ctx.backend_changed.emit()
 

@@ -44,6 +44,7 @@ _FAT_ILLEGAL = set('<>:"/\\|?*')
 class SdErrorCode(str, Enum):
     NOT_AUTHENTICATED = "NOT_AUTHENTICATED"   # local guard false, or device SD_ERROR:AUTH_REQUIRED / session ended mid-op
     LOCKED_OUT = "LOCKED_OUT"                 # SD_ERROR:LOCKED_OUT / AUTH_LOCKED seen
+    FORBIDDEN = "FORBIDDEN"                   # role/permission policy (decision 19): USER cannot upload; USER needs LIST/READ
     VALIDATION = "VALIDATION"                 # local name/path/size rule (or device INVALID_FILENAME / INVALID_FILE_SIZE ...)
     COLLISION = "COLLISION"                   # SD_ERROR:DESTINATION_EXISTS (no overwrite) or local dest exists
     NOT_FOUND = "NOT_FOUND"                   # SD_ERROR:FILE_NOT_FOUND
@@ -97,6 +98,7 @@ class SdResult:
 class FileListing:
     paths: tuple[str, ...]
     skipped: int = 0                # lines that failed local path validation (e.g. non-ASCII names); not downloadable
+    hidden: int = 0                 # entries removed by the role/permission policy (USER sees only LIST-permitted files)
 
 
 @dataclass(frozen=True)
@@ -226,7 +228,10 @@ def _safe_progress(fn: Callable[[int, int], None] | None) -> Callable[[int, int]
 
 class SdService:
     def __init__(self, manager: SerialManager, session_guard: Callable[[], bool], *,
-                 timeouts: SdTimeouts | None = None, download_cap: int = DEFAULT_DOWNLOAD_CAP):
+                 timeouts: SdTimeouts | None = None, download_cap: int = DEFAULT_DOWNLOAD_CAP, policy=None):
+        # policy: hss.core.sd_policy.SdPolicy. The app controller ALWAYS passes one. None = no role/permission
+        # checks (library/test default only).
+        self.policy = policy
         self.manager = manager
         self._guard = session_guard
         self.t = timeouts or SdTimeouts()
@@ -264,6 +269,19 @@ class SdService:
         return self._submit(op, body, cb, timeout=3 * (self.t.version + 5) + 10, guarded=False)
 
     def list_files(self, cb: Callable[[SdResult], None]) -> int:
+        from dataclasses import replace
+        user_cb = cb
+        if self.policy is not None:
+            why = self.policy.list_block_reason()
+            if why:
+                self._call(user_cb, SdResult(False, None, SdError(SdErrorCode.FORBIDDEN, why)))
+                return 0
+
+            def cb(res: SdResult) -> None:  # noqa: F811  (filter by LIST permission before the UI sees it)
+                if res.ok:
+                    keep = tuple(x for x in res.value.paths if self.policy.can(x, "LIST"))
+                    res = SdResult(True, replace(res.value, paths=keep, hidden=len(res.value.paths) - len(keep)), None)
+                user_cb(res)
         op = _Op("list")
 
         def body(io):
@@ -281,6 +299,10 @@ class SdService:
 
         def pre():
             validate_remote_path(path)
+            if self.policy is not None:
+                why = self.policy.download_block_reason(path)
+                if why:
+                    raise SdError(SdErrorCode.FORBIDDEN, why)
             if not dest.parent.is_dir():
                 raise SdError(SdErrorCode.LOCAL_IO, "destination folder does not exist")
             if dest.exists() and not overwrite:
@@ -318,6 +340,10 @@ class SdService:
         data_box: list[bytes] = []
 
         def pre():
+            if self.policy is not None:
+                why = self.policy.upload_block_reason()
+                if why:
+                    raise SdError(SdErrorCode.FORBIDDEN, why)
             validate_upload_name(device_name)
             try:
                 p = Path(local_path)

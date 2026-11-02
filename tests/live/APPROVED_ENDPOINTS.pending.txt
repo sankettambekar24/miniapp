@@ -1,0 +1,10 @@
+# STAGED, NOT ARMED. The harness only reads APPROVED_ENDPOINTS.txt (this file is ignored by it).
+# User approval (2026-11-03): items 1-5 approved; item 6 (hw_attempt_cancel) is NOT approved and must never be listed.
+# Arm ONLY after the user confirms the read-only part (Part A of tests/hardware/BACKEND_LIVE_TEST.md) passed:
+#     copy tests\live\APPROVED_ENDPOINTS.pending.txt tests\live\APPROVED_ENDPOINTS.txt
+# The user then types their OWN admin login interactively; credentials are never stored. Disarm afterwards (delete the armed file).
+create_user
+create_device
+device_status
+create_file_metadata
+create_grant

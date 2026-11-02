@@ -35,12 +35,17 @@
 ## Stages 4+5+6-groundwork (SPEED MODE; recommended options taken, logged here)
 17. **Q1/Q2/Q3 (user, 2026-11-03):** keep the F401 build + "do not flash an F405" warning; flash over SWD with ST-Link via STM32CubeProgrammer; AS608 pins stay UNVERIFIED and inactive (noted in the flash test doc).
 18. **Agents:** the SD layer and backend client were built by two sub-agents against briefs (no network, no hardware); lead integrated UI and packaging. All agent output is re-tested by the lead's full run.
-19. **Role policy for SD:** no source defines role-based SD restrictions, so admin and user dashboards both get list/download/upload. Backend enforces its own roles for backend features. Revisit if you want upload admin-only.
+19. **Role policy for SD (RESOLVED by user 2026-11-03):** upload is ADMIN-ONLY; USER gets list and download only for files with the matching permission (LIST to see, READ to download), fail-closed until permissions are loaded from the backend. Enforced in `SdService` (policy object, error `FORBIDDEN`, nothing sent to the device) and in the SD page; role comes only from the PIN identity.
 20. **Backend sign-in lives inside an active PIN session** and is dropped (client object, refresh token, access token) on any lock, sign-out, expiry or disconnect. It is explicitly NOT hardware verification.
 21. **No demo data.** Overview/tables show real backend data after sign-in, otherwise an explicit "No data" message.
 22. **SD transfers are serialized through `SerialManager.run_transaction`** (exclusive worker-thread access, binary framing). Uploads are never re-sent mid-stream (firmware deletes the partial file and has no delete command); failures verify via LIST_FILES and report PARTIAL_LEFT. Wire request IDs are enabled only after a `VERSION` probe reports REQID=1 (SD page probes automatically before the first listing).
 23. **Backend writes are never run by Claude.** `tests/live/run_live.py` needs `HSS_LIVE_TESTS=1`; write mode needs `tests/live/APPROVED_ENDPOINTS.txt`, which does not exist. Approval list offered in the stop-gate report.
 24. **Packaging:** `hss.spec` (one-folder, windowed, excludes unused Qt modules), `installer/HSS.iss` (per-user, `{localappdata}\HSS` kept), `build_release.ps1`. The frozen app has a `--smoke` mode that never opens a serial port. Installer is unsigned and unverified-on-other-PCs.
+
+## Final pass (2026-11-03)
+25. **USER permission mapping (source-derived):** LIST = the file appears in the caller's `GET /files/` (owner or active LIST grant, `storage/services.py visible_files`); READ = `GET /files/{id}/` succeeds (owner/READ grantee/admin; 404 = no READ). The backend has no path concept, so the convention is backend `display_name` == SD relative path; SD files without a matching record are invisible and undownloadable to a USER. A grants-list endpoint was NOT used because it is owner/admin-only. UNVERIFIED live.
+26. **Backend writes:** user approved items 1-5, NOT 6, gated on the user's confirmation of the read-only part and the user's own interactive admin login (Claude cannot supply credentials). Staged as `tests/live/APPROVED_ENDPOINTS.pending.txt` (ignored by the harness); the armed filename is git-ignored. The harness now saves each redacted response body/status. No write has been made.
+27. **Installer rebuilt** after the policy change; still unsigned and unverified on other PCs.
 
 ## OPEN QUESTIONS
 - Board model (F401 Black Pill vs F405 Feather): the message contained the placeholder text, not an answer.
@@ -51,4 +56,5 @@
 - STM32CubeProgrammer: install manually (st.com login) before the flash test.
 - Which physical pins does the fingerprint UART use on your wiring? (build uses core USART2 defaults)
 - Approve (or edit) the 6 backend write endpoints listed in the stop-gate report / BACKEND_LIVE_TEST.md.
-- Should SD upload be admin-only? (item 19)
+- Backend live: run Part A and report; then say ARM WRITES (items 1-5 only) and run the write step yourself with your admin login.
+- Confirm the convention backend display_name == SD path (item 25), or specify another mapping.

@@ -55,10 +55,19 @@ def attempt(name: str, fn, expect_err: str | None = None):
     """Run fn; if expect_err is a class name, an exception of that type is a pass."""
     try:
         r = fn()
-        record(name, expect_err is None, {"result_keys": sorted(r) if isinstance(r, dict) else type(r).__name__})
+        # Full response body is recorded (redact_obj strips tokens/secrets); lists are summarised, not dumped.
+        if isinstance(r, dict):
+            body = r
+        elif hasattr(r, "results"):
+            body = {"count": r.count, "rows": len(r.results)}
+        else:
+            body = {"type": type(r).__name__}
+        record(name, expect_err is None, {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "outcome": "success", "body": body})
         return r
     except BackendError as e:
-        record(name, expect_err == type(e).__name__, {"error": type(e).__name__, "status": e.status, "code": e.code})
+        record(name, expect_err == type(e).__name__, {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "outcome": "error",
+                                                      "error": type(e).__name__, "status": e.status, "code": e.code,
+                                                      "request_id": e.request_id})
     return None
 
 

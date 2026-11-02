@@ -20,7 +20,12 @@ class AppController:
         from .core.auth_fsm import AuthState
         from .core.sd_ops import SdService
         # SD operations are rejected locally unless a PIN session is active.
-        self.sd = SdService(self.manager, lambda: self.fsm.state is AuthState.SESSION_ACTIVE and self.session.active)
+        from .core.sd_policy import SdPolicy
+        self.grants = None  # GrantIndex for USER role (loaded from the backend); wiped on every lock
+        self.sd_policy = SdPolicy(lambda: self.session.identity.role if self.session.identity else None,
+                                  lambda: self.grants)
+        self.sd = SdService(self.manager, lambda: self.fsm.state is AuthState.SESSION_ACTIVE and self.session.active,
+                            policy=self.sd_policy)
         # Connection callbacks call the FSM directly on the worker thread so a disconnect locks immediately,
         # independent of the GUI event loop. The FSM is internally locked.
         self.manager.on_connected.append(lambda gen, port: self.fsm.on_connected(gen))
@@ -36,6 +41,7 @@ class AppController:
         from .core.auth_fsm import AuthState
         if fsm.state is not AuthState.SESSION_ACTIVE:
             self.backend = None
+            self.grants = None
             self.sd.cancel()  # any lock/sign-out/expiry aborts running SD transfers
 
     def ensure_backend(self, url: str | None = None):

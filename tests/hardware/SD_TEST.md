@@ -33,3 +33,16 @@ Design and firmware cites: `docs/SD_DESIGN.md`. Expected device lines are SKETCH
 | 16 | **Session expiry mid-use** (optional, 5 min idle): leave idle, then list. | `SESSION_EXPIRED` | NOT_AUTHENTICATED; app returns to IDLE | |
 
 After the run paste the evidence files to Claude; only then can steps be marked VERIFIED-HARDWARE (per step). Record any deviation from "Expected" verbatim.
+
+
+## Addendum: role policy (decision 19, 2026-11-03) - MOCK-TESTED, hardware NOT-STARTED
+Needs the identity file mapping slot 1 = admin, slot 2 = user, and (for the USER steps) a backend account whose files are named EXACTLY like the SD files (`display_name` == SD path) with the LIST/READ grants below.
+| # | Action | Expected |
+|---|---|---|
+| R1 | Sign in with the slot 2 PIN (USER). Open Physical SD. | `Upload file...` disabled, tooltip contains "admin-only". `Refresh list` disabled, tooltip says permissions are not loaded. |
+| R2 | Backend tab: sign in as the test USER; permissions auto-load (or press `Load permissions`). Press `Refresh list`. | Only files the user owns or holds an active LIST grant on appear; status shows "(N hidden: no LIST permission)". |
+| R3 | Select a file with LIST only. | `Download selected...` disabled, tooltip "You do not hold a READ permission for this file." Nothing is sent to the device. |
+| R4 | Select a file with a READ grant (or owned by the user). | Download enabled and works (same checks as step 4 of the main script). |
+| R5 | Sign out of the backend. | Permissions cleared; list/download disabled again (fail-closed). |
+| R6 | Sign in with the slot 1 PIN (ADMIN). | Upload/list/download all enabled for every file regardless of grants. |
+Capture evidence under `tests/evidence/hardware/sd/`.

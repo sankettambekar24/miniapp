@@ -19,3 +19,5 @@ firmware/BASE_*.orig
 release/
 dist/
 build/
+
+tests/live/APPROVED_ENDPOINTS.txt

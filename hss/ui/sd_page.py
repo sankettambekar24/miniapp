@@ -14,6 +14,7 @@ from ..core.auth_fsm import AuthState
 from ..core.sd_ops import SdError, SdErrorCode, SdResult
 
 FRIENDLY = {
+    SdErrorCode.FORBIDDEN: "Not allowed by the role/permission policy.",
     SdErrorCode.NOT_AUTHENTICATED: "Not authenticated on the device (PIN session required).",
     SdErrorCode.LOCKED_OUT: "The device is locked out. Reset/power-cycle it.",
     SdErrorCode.VALIDATION: "Rejected by name/path/size validation.",
@@ -53,9 +54,9 @@ class _Bridge(QObject):
 
 
 class SdPage(QWidget):
-    def __init__(self, ctl):
+    def __init__(self, ctl, ctx=None):
         super().__init__()
-        self.ctl = ctl
+        self.ctl, self.ctx = ctl, ctx
         self.sd = ctl.sd
         self.br = _Bridge()
         self.br.done.connect(self._done)
@@ -66,9 +67,11 @@ class SdPage(QWidget):
         lay.addWidget(self.caps)
         bar = QHBoxLayout()
         lay.addLayout(bar)
+        self.btn_perm = QPushButton("Load permissions")
+        self.btn_perm.clicked.connect(self._load_perms)
         self.btn_probe, self.btn_list = QPushButton("Check firmware"), QPushButton("Refresh list")
         self.btn_down, self.btn_up, self.btn_cancel = QPushButton("Download selected..."), QPushButton("Upload file..."), QPushButton("Cancel")
-        for b in (self.btn_probe, self.btn_list, self.btn_down, self.btn_up, self.btn_cancel):
+        for b in (self.btn_probe, self.btn_perm, self.btn_list, self.btn_down, self.btn_up, self.btn_cancel):
             bar.addWidget(b)
         bar.addStretch(1)
         self.files = QListWidget()
@@ -85,6 +88,8 @@ class SdPage(QWidget):
         self.btn_down.clicked.connect(self._download)
         self.btn_up.clicked.connect(self._upload)
         self.btn_cancel.clicked.connect(self.sd.cancel)
+        if ctx is not None:
+            ctx.backend_changed.connect(self.update_controls)
         ctl.fsm.listeners.append(lambda _f: self.br.progress.emit(-1, -1))  # state change -> refresh controls on GUI thread
         self.update_controls()
 
@@ -100,14 +105,24 @@ class SdPage(QWidget):
 
     def update_controls(self) -> None:
         why = self._reason_disabled()
-        selected = self.files.currentItem() is not None
-        for b, extra in ((self.btn_probe, None), (self.btn_list, None), (self.btn_down, None if selected else "Select a file first."),
-                         (self.btn_up, None)):
+        pol = self.ctl.sd_policy
+        item = self.files.currentItem()
+        selected = item is not None
+        down_extra = "Select a file first." if not selected else pol.download_block_reason(item.text())
+        list_extra = pol.list_block_reason()
+        user = pol.role == "user"
+        for b, extra in ((self.btn_probe, None), (self.btn_list, list_extra),
+                         (self.btn_down, down_extra), (self.btn_up, pol.upload_block_reason())):
             reason = why or extra
             b.setEnabled(reason is None)
             b.setToolTip(reason or "")
         self.btn_probe.setEnabled(self.ctl.manager.connected and not self.busy)
         self.btn_probe.setToolTip("" if self.btn_probe.isEnabled() else (why or ""))
+        # USER role: permissions come from the backend (sign-in required); the button only makes sense then
+        can_load = user and self.ctx is not None and self.ctx.signed_in and not self.busy
+        self.btn_perm.setVisible(user)
+        self.btn_perm.setEnabled(can_load)
+        self.btn_perm.setToolTip("" if can_load else "Sign in to the backend first (Backend tab).")
         self.btn_cancel.setEnabled(self.busy)
         self.btn_cancel.setToolTip("" if self.busy else "Nothing to cancel.")
         if why and not self.busy:
@@ -123,6 +138,10 @@ class SdPage(QWidget):
         self.update_controls()
 
     # ---- actions ----
+    def _load_perms(self) -> None:
+        if self.ctx is not None:
+            self.ctx.load_grants(self.status.setText)
+
     def _probe(self) -> None:
         self._start("Asking the device for its firmware version ...")
         self.sd.probe(lambda r: self.br.done.emit("probe", r))
@@ -183,6 +202,8 @@ class SdPage(QWidget):
             self.files.clear()
             self.files.addItems(list(v.paths))
             extra = f" ({v.skipped} entries skipped: unsupported names)" if v.skipped else ""
+            if v.hidden:
+                extra += f" ({v.hidden} hidden: no LIST permission)"
             self.status.setText(f"{len(v.paths)} file(s) on the SD card{extra}.")
         elif kind == "download":
             self.status.setText(f"Downloaded {v.path} ({v.size} bytes) to {v.dest_path}.")
@@ -201,4 +222,4 @@ class SdPage(QWidget):
 
 
 def make_sd_page(ctx) -> QWidget:
-    return SdPage(ctx.ctl)
+    return SdPage(ctx.ctl, ctx)

@@ -123,3 +123,39 @@ def test_no_enabled_button_without_an_action(app):
         if b.isEnabled():
             # enabled buttons must be wired (Qt exposes receivers via signal count)
             assert b.receivers("2clicked(bool)") > 0, b.text()
+
+
+# ---- decision 19 in the UI ----
+def _sd_page(w):
+    return [w.dash.widget(i) for i in range(w.dash.count()) if w.dash.tabText(i) == "Physical SD"][0]
+
+
+def test_user_sd_page_upload_disabled_admin_only_and_list_needs_permissions(app):
+    rig = Rig([ST])
+    w = MainWindow(rig.ctl)
+    login(rig, w, 2)
+    sd = _sd_page(w)
+    sd.update_controls()
+    assert not sd.btn_up.isEnabled() and "admin" in sd.btn_up.toolTip().lower()
+    assert not sd.btn_list.isEnabled() and "permissions" in sd.btn_list.toolTip().lower()
+    assert not sd.btn_perm.isHidden() and not sd.btn_perm.isEnabled()
+    from hss.core.sd_policy import GrantIndex
+    rig.ctl.grants = GrantIndex({"a.txt": frozenset({"LIST"})})
+    sd.update_controls()
+    assert sd.btn_list.isEnabled()
+    sd.files.addItem("a.txt")
+    sd.files.setCurrentRow(0)
+    sd.update_controls()
+    assert not sd.btn_down.isEnabled() and "READ" in sd.btn_down.toolTip()   # LIST only, no READ
+    rig.ctl.grants = GrantIndex({"a.txt": frozenset({"LIST", "READ"})})
+    sd.update_controls()
+    assert sd.btn_down.isEnabled() and not sd.btn_up.isEnabled()
+
+
+def test_admin_sd_page_upload_enabled(app):
+    rig = Rig([ST])
+    w = MainWindow(rig.ctl)
+    login(rig, w, 1)
+    sd = _sd_page(w)
+    sd.update_controls()
+    assert sd.btn_up.isEnabled() and sd.btn_perm.isHidden()

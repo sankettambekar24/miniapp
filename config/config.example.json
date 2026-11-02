@@ -1,0 +1,8 @@
+{
+  "_comment": "Copy to %LOCALAPPDATA%/HSS/config.json. Omit or set mode to 'production' for fail-closed production mode.",
+  "mode": "pin_test",
+  "usb_ids": [{"vid": "0483", "pid": "5740"}],
+  "description_contains": [],
+  "baud": 115200,
+  "backend_url": null
+}

@@ -277,3 +277,6 @@ Conclusions:
 11. **Desktop gating contradicts docs:**
     - `hardware_protocol_inventory.md` §2 describes LIST/READ upload to the legacy backend as active.
     - `face_bridge.py:35, 771` and `security_events.py:22` now disable all of it (`upload_device_file_to_backend` returns False).
+
+## 12. Lockout policy decision (user, 2026-11-03)
+Lockout that clears only on device reset/power-cycle (`.ino` L935-949, volatile RAM, no timed/admin unlock) is ACCEPTABLE for testing. It is documented here and NOT changed in this build. The desktop mirrors it as state LOCKED and instructs the user to reset the device (`hss/core/auth_fsm.py`).

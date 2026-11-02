@@ -1,22 +1,23 @@
 # PROJECT STATUS (resume from here)
-Date: 2026-11-03. Stage 1 (Discovery): COMPLETE, awaiting user "proceed" and answers to D0-D6 in docs/DECISIONS.md.
+Date: 2026-11-03. **Stage 1 COMPLETE. Stage 2 (Core) COMPLETE pending user hardware test; waiting for "proceed" to Stage 3.**
+Stage order now: 2 Core > 3 Firmware > 4 Dashboards+SD > 5 Backend client > 6 Packaging.
 
-## Done (all NOT-STARTED for app code; docs only)
-FEATURE_PARITY.md (71 rows), docs/FIRMWARE_ANALYSIS.md, docs/BACKEND_ANALYSIS.md, docs/CONFLICTS.md (32), docs/ARCHITECTURE.md, docs/TOOLCHAIN.md, docs/DECISIONS.md,
-tests/run_probes.ps1 + tests/fixtures/probes/ (33 read-only GET/HEAD/OPTIONS probes of the Render backend, 2026-11-02).
+## Built in Stage 2 (all code status: IMPLEMENTED-UNTESTED on hardware; logic MOCK-TESTED)
+- `hss/core/serial_manager.py` single port owner, worker thread, queue, request IDs, timeouts, hot-plug, stale flush, generation tags
+- `hss/core/discovery.py` VID/PID/description discovery, ambiguity = refuse
+- `hss/core/auth_fsm.py` IDLE>WAITING_PIN>VERIFIED/FAILED/LOCKED>SESSION_ACTIVE>LOCKED_ON_DISCONNECT
+- `hss/core/{protocol,identity,session}.py`, `hss/factors/` (disabled stubs), `hss/config.py`, `hss/controller.py`
+- `hss/ui/` PySide6 shell (sidebar, red banner, auth page, role-routed placeholder dashboards, status bar USB/auth/backend)
+- `config/*.example.json` templates; `tests/unit/` 52 tests; `tests/hardware/{PIN_AUTH_TEST,FLASH_BACKUP}.md`; `tests/evidence/`
 
-## Verification totals
-VERIFIED-HARDWARE: 0. VERIFIED-LIVE-API: only observed GET/HEAD/OPTIONS probe results (health 200, protected GETs 401). Everything else unverified.
+## Test status
+MOCK-TESTED: 52 unit tests pass (`.venv\Scripts\python -m pytest`). VERIFIED-HARDWARE: 0. VERIFIED-LIVE-API: only Stage 1 GET/HEAD/OPTIONS observations.
+BLOCKED-ON-FIRMWARE: PIN slot reporting, PIN-only SD session. BLOCKED-ON-BACKUP: all firmware work (`C:\mini project\HSS_Firmware_Backup\` missing).
 
-## Key findings
-- No firmware in project tree; one sketch in WhatsApp cache (copy it); flashed build not provably that sketch.
-- Old packaged exe = Django companion prototype only. Legacy FastAPI server returns 409 for all auth.
-- Firmware: single compiled-in PIN, PIN+face+fingerprint required for SD session, lockout until reset, no CRC.
-- Backend: no trusted hardware verification; file content always 503; /admin/login/ public.
-- Toolchain missing: PySide6, PyInstaller, Inno Setup, STM32 core/CubeProgrammer.
+## How to run / test
+- Tests: `cd "C:\mini project\HSS_Complete_Desktop"; .venv\Scripts\python -m pytest`
+- App (no console): `.venv\Scripts\pythonw.exe -m hss` after copying `config/*.example.json` to `%LOCALAPPDATA%\HSS\` (see tests/hardware/PIN_AUTH_TEST.md). Without `config.json` the app is production/fail-closed.
+- Read-only backend probes: `powershell testsun_probes.ps1`
 
 ## Next
-Stage 2 after answers. Open questions: D0-D6. No POST/PUT/PATCH/DELETE approved against the backend.
-
-## How to run/test
-Nothing runnable yet. Probes: `powershell tests\run_probes.ps1` (read-only).
+User: run tests/hardware/PIN_AUTH_TEST.md; create the firmware backup per FLASH_BACKUP.md; answer open questions in docs/DECISIONS.md. Then "proceed" to Stage 3.

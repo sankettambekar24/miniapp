@@ -1,0 +1,163 @@
+"""Main window: sidebar, banner, auth page, role-routed placeholder dashboards, status bar."""
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
+                               QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+
+from ..controller import AppController
+from ..core.auth_fsm import PRODUCTION_MESSAGE, AuthState
+from ..factors.base import FACE, FINGERPRINT
+from .qt_bridge import QtBridge
+
+BANNER_TEXT = "PIN-ONLY TEST MODE - not production authentication"
+PAGE_AUTH, PAGE_ADMIN, PAGE_USER, PAGE_LOG = range(4)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, controller: AppController):
+        super().__init__()
+        self.ctl = controller
+        self.bridge = QtBridge(controller)
+        self.setWindowTitle("Hybrid Secure Storage")
+        self.resize(980, 640)
+
+        root = QWidget()
+        self.setCentralWidget(root)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self.banner = QLabel(BANNER_TEXT)
+        self.banner.setObjectName("testBanner")
+        self.banner.setAlignment(Qt.AlignCenter)
+        self.banner.setStyleSheet("background:#c62828;color:white;font-weight:bold;padding:6px;")
+        self.banner.setVisible(controller.config.test_mode)
+        outer.addWidget(self.banner)
+
+        body = QHBoxLayout()
+        outer.addLayout(body)
+        self.sidebar = QListWidget()
+        self.sidebar.setFixedWidth(190)
+        for label in ("Authentication", "Admin dashboard", "User dashboard", "Device log"):
+            self.sidebar.addItem(QListWidgetItem(label))
+        self.sidebar.currentRowChanged.connect(self._on_sidebar)
+        body.addWidget(self.sidebar)
+
+        self.stack = QStackedWidget()
+        body.addWidget(self.stack, 1)
+        self.stack.addWidget(self._build_auth_page())
+        self.stack.addWidget(self._placeholder("Admin dashboard", "Stage 4: user/device/file/permission management and SD operations."))
+        self.stack.addWidget(self._placeholder("User dashboard", "Stage 4: file access and SD operations."))
+        self.log_view = QPlainTextEdit(readOnly=True)
+        self.stack.addWidget(self.log_view)
+
+        self.usb_label = QLabel("USB: searching")
+        self.mode_label = QLabel()
+        self.backend_label = QLabel("Backend: local-only (no sign-in)")
+        for w in (self.usb_label, self.mode_label, self.backend_label):
+            self.statusBar().addPermanentWidget(w)
+            self.statusBar().addPermanentWidget(QLabel(" | "))
+        self.bridge.auth_changed.connect(self.refresh)
+        self.bridge.usb_changed.connect(self.usb_label.setText)
+        self.bridge.device_line.connect(self._append_log)
+        self.refresh()
+        self.sidebar.setCurrentRow(PAGE_AUTH)
+
+    # ---- pages ----
+    def _placeholder(self, title: str, text: str) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        h = QLabel(title)
+        h.setStyleSheet("font-size:20px;font-weight:bold;")
+        lay.addWidget(h)
+        lay.addWidget(QLabel(text + "\nNot implemented yet (NOT-STARTED)."))
+        self.session_info = getattr(self, "session_info", [])
+        info = QLabel("")
+        self.session_info.append(info)
+        lay.addWidget(info)
+        lay.addStretch(1)
+        return w
+
+    def _build_auth_page(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        self.mode_title = QLabel()
+        self.mode_title.setObjectName("modeTitle")
+        self.mode_title.setStyleSheet("font-size:22px;font-weight:bold;")
+        self.state_label = QLabel()
+        self.state_label.setObjectName("stateLabel")
+        self.state_label.setStyleSheet("font-size:16px;")
+        self.state_label.setWordWrap(True)
+        self.start_btn = QPushButton("Start authentication")
+        self.start_btn.clicked.connect(self._on_start)
+        self.signout_btn = QPushButton("Sign out")
+        self.signout_btn.clicked.connect(self.ctl.sign_out)
+        lay.addWidget(self.mode_title)
+        lay.addWidget(self.state_label)
+        lay.addWidget(self.start_btn)
+        lay.addWidget(self.signout_btn)
+        box = QFrame()
+        box.setFrameShape(QFrame.StyledPanel)
+        bl = QVBoxLayout(box)
+        bl.addWidget(QLabel("Other factors"))
+        for f in (FACE, FINGERPRINT):
+            lbl = QLabel(f"{f.name}: {f.status_text} (disabled stub)")
+            lbl.setEnabled(False)
+            lbl.setToolTip("Interface only in this build; no verification is performed.")
+            bl.addWidget(lbl)
+        lay.addWidget(box)
+        warn = self.ctl.resolver.warning if self.ctl.config.test_mode else None
+        cfgw = self.ctl.config.load_warning
+        self.warn_label = QLabel("\n".join(x for x in (warn, cfgw) if x))
+        self.warn_label.setStyleSheet("color:#b26a00;")
+        lay.addWidget(self.warn_label)
+        lay.addStretch(1)
+        return w
+
+    # ---- behaviour ----
+    def _on_sidebar(self, row: int) -> None:
+        if row in (PAGE_ADMIN, PAGE_USER) and not self._allowed(row):
+            self.sidebar.setCurrentRow(PAGE_AUTH)
+            return
+        self.stack.setCurrentIndex(max(row, 0))
+
+    def _allowed(self, row: int) -> bool:
+        ident = self.ctl.session.identity
+        if self.ctl.fsm.state is not AuthState.SESSION_ACTIVE or ident is None:
+            return False
+        return (row == PAGE_ADMIN and ident.role == "admin") or (row == PAGE_USER and ident.role == "user")
+
+    def _on_start(self) -> None:
+        res = self.ctl.begin_auth()
+        if not res.ok:
+            self.state_label.setText(res.message)
+
+    def _append_log(self, text: str) -> None:
+        self.log_view.appendPlainText(text)
+
+    def refresh(self) -> None:
+        fsm, cfg = self.ctl.fsm, self.ctl.config
+        test = cfg.test_mode
+        self.mode_label.setText("Auth: PIN-ONLY TEST MODE" if test else "Auth: production (fail-closed)")
+        self.mode_title.setText("PIN-ONLY TEST MODE" if test else PRODUCTION_MESSAGE)
+        self.mode_title.setStyleSheet("font-size:22px;font-weight:bold;color:%s;" % ("#c62828" if test else "#555"))
+        self.state_label.setText(f"{fsm.state.value}: {fsm.message}")
+        can_start = test and fsm.connected and fsm.state in (AuthState.IDLE, AuthState.FAILED, AuthState.LOCKED_ON_DISCONNECT)
+        self.start_btn.setEnabled(can_start)
+        self.start_btn.setToolTip("" if can_start else
+                                  (PRODUCTION_MESSAGE if not test else "Connect the device first, or authentication is already in progress/locked"))
+        self.signout_btn.setEnabled(fsm.state is AuthState.SESSION_ACTIVE)
+        # role-based routing: role comes only from the local identity file via the FSM
+        ident = self.ctl.session.identity
+        for row, role in ((PAGE_ADMIN, "admin"), (PAGE_USER, "user")):
+            item = self.sidebar.item(row)
+            ok = self._allowed(row)
+            item.setFlags(item.flags() | Qt.ItemIsEnabled if ok else item.flags() & ~Qt.ItemIsEnabled)
+            item.setToolTip("" if ok else "Requires an authenticated session with the matching role")
+        for lbl in self.session_info:
+            lbl.setText(f"Signed in: {ident.name} (role {ident.role})" if ident else "")
+        if fsm.state is AuthState.SESSION_ACTIVE and ident:
+            self.sidebar.setCurrentRow(PAGE_ADMIN if ident.role == "admin" else PAGE_USER)
+        elif self.stack.currentIndex() in (PAGE_ADMIN, PAGE_USER):
+            self.sidebar.setCurrentRow(PAGE_AUTH)  # locked/ended: leave the dashboard immediately

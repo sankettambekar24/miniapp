@@ -1,5 +1,5 @@
 # READ-ONLY probe: GET/HEAD/OPTIONS only.
-param([string]$Base="https://mini-backend-z8dr.onrender.com", [string]$Out="C:\mini project\HSS_Complete_Desktop\tests\fixtures\probes")
+param([string]$Base="https://mini-backend-z8dr.onrender.com", [string]$Out="C:\mini project\HSS_Complete_Desktop\tests\evidence\probes")
 $nil="00000000-0000-0000-0000-000000000000"
 $probes=@(
  @("GET","/api/v1/health/live/"),@("HEAD","/api/v1/health/live/"),@("OPTIONS","/api/v1/health/live/"),

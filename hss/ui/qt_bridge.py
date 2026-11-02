@@ -1,0 +1,31 @@
+"""Thread-safe Qt signals for worker-thread callbacks (signals emitted from another thread are queued to the GUI)."""
+from __future__ import annotations
+
+from PySide6.QtCore import QObject, Signal
+
+from ..controller import AppController
+
+
+class QtBridge(QObject):
+    auth_changed = Signal()
+    usb_changed = Signal(str)
+    device_line = Signal(str)
+
+    def __init__(self, controller: AppController):
+        super().__init__()
+        self.controller = controller
+        controller.fsm.listeners.append(lambda _fsm: self.auth_changed.emit())
+        m = controller.manager
+        m.on_connected.append(lambda gen, port: self.usb_changed.emit(f"USB: connected ({port.device})"))
+        m.on_disconnected.append(lambda reason: self.usb_changed.emit(f"USB: disconnected ({reason})"))
+        m.on_scan.append(self._on_scan)
+        m.on_line.append(lambda ev: self.device_line.emit(ev.text))
+
+    def _on_scan(self, result) -> None:
+        if self.controller.manager.connected:
+            return
+        k = result.kind.value
+        text = {"none": "USB: no HSS device found",
+                "multiple": "USB: multiple matching devices - unplug extras",
+                "one": "USB: device found, opening"}[k]
+        self.usb_changed.emit(text)

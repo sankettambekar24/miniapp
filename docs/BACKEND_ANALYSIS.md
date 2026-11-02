@@ -1,7 +1,7 @@
 # HSS Backend Analysis (read-only discovery)
 
 Source: `C:\mini project\backend\` (Django + DRF + Simple JWT). Live: https://mini-backend-z8dr.onrender.com.
-Probe date (UTC): 2026-11-02 19:36-19:38. Raw probes: `tests/fixtures/probes/*.json` (script: `tests/run_probes.ps1`, GET/HEAD/OPTIONS only; 33 probes).
+Probe date (UTC): 2026-11-02 19:36-19:38. Raw probes: `tests/evidence/probes/*.json` (script: `tests/run_probes.ps1`, GET/HEAD/OPTIONS only; 33 probes).
 Citations `file:line` are relative to `backend/`. Status labels: VERIFIED-LIVE-API (observed live), IMPLEMENTED-UNTESTED (in source, not exercised live), UNVERIFIED.
 
 ## 1. Global configuration
@@ -82,3 +82,8 @@ See `docs/_conflicts_backend.md`.
 - Treat 503 `FILE_CONTENT_UNAVAILABLE` and 503 `OFFLINE_POLICY_ISSUANCE_DISABLED` as unavailable features, not retryable errors.
 - Lists are paginated (`results`) except the grants list (plain array). Validate absolute `next` links same-origin.
 - Register/login/preauth are throttled (429).
+
+## 8. Hardening recommendations (documented only; NO backend changes made)
+1. **`/admin/login/` is publicly reachable** on the live service (HTTP 200 on GET, `tests/evidence/probes/GET_admin_login.json`, VERIFIED-LIVE-API for the observation). Recommend: restrict by IP/VPN or reverse-proxy rule, move the admin URL off the default path, require 2FA, and rate-limit it. The backend owner decides; the desktop app does not use `/admin/`.
+2. No OpenAPI/schema/docs routes exist (404) - good for exposure, but means contract tests must use recorded probes and source (Stage 5).
+3. Hardware-auth trust gap remains: the backend cannot accept a hardware-verified session (`complete` always returns FACTOR_VERIFICATION_UNAVAILABLE; factors stored verified=false). The desktop must not claim backend-verified hardware auth.

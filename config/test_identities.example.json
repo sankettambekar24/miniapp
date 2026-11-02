@@ -1,0 +1,8 @@
+{
+  "_comment": "Copy to %LOCALAPPDATA%/HSS/test_identities.json. Example names only; no real data. The firmware reports a PIN slot number only; role comes from this file.",
+  "version": 1,
+  "slots": {
+    "1": {"identity": "test-admin", "role": "admin"},
+    "2": {"identity": "test-user", "role": "user"}
+  }
+}

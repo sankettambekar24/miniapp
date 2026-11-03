@@ -432,3 +432,13 @@ def test_ui_routes_by_role_and_shows_only_real_steps():
     titles = [w.dash.tabText(i) for i in range(w.dash.count())]
     assert titles == ["SD Card"]                                              # no Users/Devices/Audit/Backend for a USER
     app.processEvents()
+
+
+def test_device_refusal_includes_the_device_diagnostic_line():
+    r = ProdRig()
+    r.ctl.fsm.on_connected(r.gen)
+    r.say("BOOTSTRAP_OK")
+    rec = r.ctl.enroller.begin("Jo Diag", "admin")
+    _, err = r.run_service(lambda: r.ctl.enroller.enroll_fingerprint(rec.user_id),
+                           {"ENROLL_FINGERPRINT": ["DBG: FP_SLOT_PROBE_ERROR id=1 status=1", "ENROLL_ERROR:NO_FREE_SLOT_OR_COUNT_READ"]})
+    assert isinstance(err, EnrollmentError) and "FP_SLOT_PROBE_ERROR id=1 status=1" in str(err)

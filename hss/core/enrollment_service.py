@@ -85,16 +85,22 @@ class EnrollmentService:
             raise DeviceError("The device is not connected.")
         self._ensure_probe()
         done, box = threading.Event(), {}
-        listener = (lambda ev: progress(ev.text)) if progress else None
-        if listener:
-            ctl.manager.on_line.append(listener)
+        dbg: list[str] = []          # device diagnostics (never contain PIN digits: the firmware prints none)
+
+        def listener(ev):
+            if ev.text.startswith("DBG: ") and "EVENT" not in ev.text:
+                dbg.append(ev.text[5:])
+            if progress:
+                progress(ev.text)
+
+        ctl.manager.on_line.append(listener)
         try:
             ctl.manager.send(command, ok_prefixes=ok_prefixes, err_prefixes=err_prefixes, timeout=timeout,
                              callback=lambda r: (box.update(r=r), done.set()))
             if not done.wait(timeout + 10):
                 raise DeviceError("The device did not answer in time.")
         finally:
-            if listener and listener in ctl.manager.on_line:
+            if listener in ctl.manager.on_line:
                 ctl.manager.on_line.remove(listener)
         resp = box["r"]
         if resp.status is RequestStatus.OK:
@@ -103,7 +109,8 @@ class EnrollmentService:
         for p in err_prefixes:
             if err.startswith(p):
                 code = err[len(p):]
-                raise DeviceError(texts.get(code, f"The device refused ({code})."), code)
+                extra = f" Device detail: {'; '.join(dbg[-2:])}" if dbg else ""
+                raise DeviceError(texts.get(code, f"The device refused ({code}).") + extra, code)
         raise DeviceError({"timeout": "The device did not answer in time.", "disconnected": "The device disconnected."}.get(
             resp.status.value, f"Device error: {err}"))
 

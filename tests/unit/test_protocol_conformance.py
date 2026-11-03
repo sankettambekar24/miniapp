@@ -198,3 +198,12 @@ def test_bootstrap_session_is_enrollment_only():
 def test_host_face_replies_registry_matches_firmware():
     for r in P.HOST_FACE_REPLIES:
         assert f'"{r}%u"' in SRC
+
+
+def test_free_slot_probe_treats_clone_empty_code_as_free():
+    """Regression (first three-factor hardware run): AS608 clones answer an EMPTY slot with 0x0C (DBRANGEFAIL)."""
+    body = SRC[SRC.index("int findFreeFingerprintSlot()"):SRC.index("void enrollFingerprintFromHost")]
+    assert "result == FINGERPRINT_NOTFOUND || result == FINGERPRINT_DBRANGEFAIL) return (int)id;" in body
+    assert "if (result == FINGERPRINT_OK) continue;" in body
+    assert "maxSlots = MAX_USERS" in body          # three-factor IDs stay within 1..16
+    assert "return -1;\n  }\n\n  // Probe" not in body  # a failed capacity read no longer aborts enrollment

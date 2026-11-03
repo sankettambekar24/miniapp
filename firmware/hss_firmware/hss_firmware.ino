@@ -731,19 +731,29 @@ bool receiveHostFileToSD(const char* filename, uint32_t fileSize) {
 // call loadModel() after createModel(), because it can replace char-buffer 1.
 int findFreeFingerprintSlot() {
   uint8_t status = finger.getParameters();
-  if (status != FINGERPRINT_OK || finger.capacity == 0) {
+  uint16_t maxSlots = 127;
+  if (status == FINGERPRINT_OK && finger.capacity > 0) {
+    maxSlots = finger.capacity;
+  } else {
+    // HSS-S6: some AS608 clones do not answer ReadSysPara; the slot probe below still works.
     Serial.print("DBG: FP_CAPACITY_READ_ERROR=");
     Serial.println(status);
-    return -1;
   }
+#if HSS_REQUIRE_FACTORS
+  if (maxSlots > MAX_USERS) maxSlots = MAX_USERS;  // three-factor build: IDs 1..16 only
+#endif
+  if (maxSlots > 127) maxSlots = 127;
 
   // Probe individual slots; template count is not a reliable free-slot index.
-  uint16_t maxSlots = finger.capacity;
-  if (maxSlots > 127) maxSlots = 127;
   for (uint16_t id = 1; id <= maxSlots; id++) {
     uint8_t result = finger.loadModel(id);
-    if (result == FINGERPRINT_NOTFOUND) return (int)id;
-    if (result != FINGERPRINT_OK) {
+    if (result == FINGERPRINT_OK) continue;  // occupied
+    // HSS-S6 FIX (first three-factor hardware run): AS608 clones report an EMPTY slot as 0x0C
+    // (FINGERPRINT_DBRANGEFAIL, "error reading template / invalid template"), not 0x09 NOTFOUND.
+    // The old code treated that as a sensor error, so enrollment always failed with NO_FREE_SLOT.
+    if (result == FINGERPRINT_NOTFOUND || result == FINGERPRINT_DBRANGEFAIL) return (int)id;
+    if (result == FINGERPRINT_BADLOCATION) break;  // beyond this sensor's library: no free slot
+    {
       Serial.print("DBG: FP_SLOT_PROBE_ERROR id=");
       Serial.print(id);
       Serial.print(" status=");

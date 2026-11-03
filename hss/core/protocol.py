@@ -50,6 +50,19 @@ class EventKind(Enum):
     SESSION_ENDED = "session_ended"
     SESSION_EXPIRED = "session_expired"
     FACTOR_PROMPT = "factor_prompt"
+    # three-factor firmware (0.4.0-stage6)
+    FACE_REQUEST = "face_request"        # FACE_SCAN:<id>  fingerprint matched; host must verify THAT user's face
+    AUTH_STAGE = "auth_stage"            # AUTH_STAGE:PIN  face accepted, PIN prompt is on the device
+    AUTH_OK = "auth_ok"                  # AUTH_OK:<id>    all three factors passed
+    AUTH_FAILED = "auth_failed"          # AUTH_FAILED:<stage>  FP|FACE|PIN|BOOT  (stage is for the AUDIT LOG only)
+    BOOTSTRAP_OK = "bootstrap_ok"        # empty user store + bootstrap PIN: enrollment-only session
+    ENROLL_PROGRESS = "enroll_progress"  # ENROLL:PLACE_FINGER / REMOVE_FINGER / PLACE_AGAIN
+    ENROLL_OK = "enroll_ok"              # ENROLL_OK:<label>:<id>
+    ENROLL_ERROR = "enroll_error"        # ENROLL_ERROR:<code>
+    PIN_SET_OK = "pin_set_ok"            # PIN_SET_OK:<id>
+    PIN_SET_ERROR = "pin_set_error"      # PIN_SET_ERROR:<code>
+    USER_DELETED = "user_deleted"        # USER_DELETED:<id>
+    USER_ERROR = "user_error"            # USER_ERROR:<code>
     SD_ERROR = "sd_error"
     OTHER = "other"
 
@@ -65,8 +78,39 @@ class DeviceEvent:
 _SLOT_RE = re.compile(r"^AUTH_PIN_VERIFIED:(\d+)$")
 
 
+_IDSTAGE = re.compile(r"^(AUTH_OK|FACE_SCAN|PIN_SET_OK|USER_DELETED):(\d{1,2})$")
+_ENROLL_OK = re.compile(r"^ENROLL_OK:(.{1,64}):(\d{1,3})$")
+
+
+def _parse_three_factor(t: str) -> "DeviceEvent | None":
+    m = _IDSTAGE.match(t)
+    if m:
+        kind = {"AUTH_OK": EventKind.AUTH_OK, "FACE_SCAN": EventKind.FACE_REQUEST,
+                "PIN_SET_OK": EventKind.PIN_SET_OK, "USER_DELETED": EventKind.USER_DELETED}[m.group(1)]
+        return DeviceEvent(kind, slot=int(m.group(2)), planned=True)
+    m = _ENROLL_OK.match(t)
+    if m:
+        return DeviceEvent(EventKind.ENROLL_OK, slot=int(m.group(2)), detail=m.group(1), planned=True)
+    if t == "AUTH_STAGE:PIN":
+        return DeviceEvent(EventKind.AUTH_STAGE, detail="PIN", planned=True)
+    if t.startswith("AUTH_FAILED:"):
+        return DeviceEvent(EventKind.AUTH_FAILED, detail=t.split(":", 1)[1] or None, planned=True)
+    if t == "BOOTSTRAP_OK":
+        return DeviceEvent(EventKind.BOOTSTRAP_OK, planned=True)
+    if t in ("ENROLL:PLACE_FINGER", "ENROLL:REMOVE_FINGER", "ENROLL:PLACE_AGAIN"):
+        return DeviceEvent(EventKind.ENROLL_PROGRESS, detail=t.split(":", 1)[1], planned=True)
+    for prefix, kind in (("ENROLL_ERROR:", EventKind.ENROLL_ERROR), ("PIN_SET_ERROR:", EventKind.PIN_SET_ERROR),
+                         ("USER_ERROR:", EventKind.USER_ERROR)):
+        if t.startswith(prefix):
+            return DeviceEvent(kind, detail=t[len(prefix):], planned=True)
+    return None
+
+
 def parse_line(text: str) -> DeviceEvent:
     t = text.strip()
+    tf = _parse_three_factor(t)
+    if tf is not None:
+        return tf
     if t == LEGACY_PIN_VERIFIED:
         return DeviceEvent(EventKind.PIN_VERIFIED)  # legacy: slot NOT reported
     m = _SLOT_RE.match(t)
@@ -110,7 +154,7 @@ REQ_BEGIN_PREFIX = "REQ_BEGIN:"            # REQ_BEGIN:<id>   (only for commands
 REQ_END_PREFIX = "REQ_END:"                # REQ_END:<id>
 MAX_WIRE_ID = 999_999_999                  # firmware accepts 1..9 digits, id != 0
 
-_VERSION_RE = re.compile(r"^HSS_FW:([^:]+):AUTH=(PIN_ONLY|PIN_FACE_FP):SLOTS=(\d+):REQID=(\d+)$")
+_VERSION_RE = re.compile(r"^HSS_FW:([^:]+):AUTH=(PIN_ONLY|PIN_FACE_FP|THREE_FACTOR):SLOTS=(\d+):REQID=(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -143,13 +187,19 @@ FIRMWARE_EMITS = (
     LEGACY_FACE_SCAN, LEGACY_FINGERPRINT_SCAN, LEGACY_SD_ERROR_PREFIX, "SD_ERROR:LOCKED_OUT",
     LEGACY_LIST_BEGIN, LEGACY_LIST_END, VERSION_PREFIX, REQ_BEGIN_PREFIX, REQ_END_PREFIX,
     "SD_FILE_BEGIN:", "SD_FILE_END", "SD_WRITE_READY:", "WRITE_CHUNK_OK:", "SD_WRITE_OK:",
+    # three-factor firmware (docs/THREE_FACTOR_DESIGN.md)
+    "FACE_SCAN:", "AUTH_STAGE:", "AUTH_OK:", "AUTH_FAILED:", "BOOTSTRAP_OK", "PIN_SET_OK:", "PIN_SET_ERROR:",
+    "USER_DELETED:", "USER_ERROR:", "ENROLL:", "ENROLL_ERROR:", "ENROLL_OK:",
 )
 # Host commands the firmware must accept (strcmp / strncmp on `command`):
-HOST_COMMANDS = (CMD_END_SESSION, CMD_LIST_FILES, CMD_VERSION, "READ_FILE:", "WRITE_FILE:")
+HOST_COMMANDS = (CMD_END_SESSION, CMD_LIST_FILES, CMD_VERSION, "READ_FILE:", "WRITE_FILE:", "ENROLL_FINGERPRINT:", "SET_PIN:",
+                 "DELETE_USER:")
+# Host replies read by the firmware while it waits for the face result (waitFaceVerdict):
+HOST_FACE_REPLIES = ("FACE_VERIFIED:", "FACE_DENIED:")
 # Firmware lines that exist but the desktop deliberately does not parse (explicit allowlist, so any NEW
 # firmware line without a desktop decision fails the conformance test):
 FIRMWARE_IGNORED_BY_DESKTOP = (
-    "ENROLL:", "ENROLL_ERROR:", "ENROLL_OK:", "ENROLL_AUTHORIZED:", "READ_ERROR:",
+    "ENROLL_AUTHORIZED:", "READ_ERROR:",
     "PROTECTED_DATA_BEGIN", "PROTECTED_DATA_END", "WRITE_CHUNK_READY:",
 )
 # Legacy `DBG: EVENT <NAME>` echoes the desktop still understands, derived from event names in the firmware:

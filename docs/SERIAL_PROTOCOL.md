@@ -83,3 +83,28 @@ Unchanged: pins, UART 115200 / fingerprint 57600, OLED/I2C, SD chip select and S
 
 ## 11. Addendum 2026-11-03
 Change #8 vs base: in `authenticate()` the PIN is compared BEFORE the old session is revoked (revoking clears the entered PIN; the base order made every PIN fail). No protocol string changed.
+
+## 12. Three-factor build (`HSS_REQUIRE_FACTORS=1`, firmware 0.4.0-stage6) - SKETCH-DERIVED, COMPILED, NOT hardware-verified
+Design: `docs/THREE_FACTOR_DESIGN.md`. `VERSION` -> `HSS_FW:0.4.0-stage6:AUTH=THREE_FACTOR:SLOTS=16:REQID=1`. The PIN-only slot protocol of section 3 is only emitted by the `HSS_REQUIRE_FACTORS=0` build.
+
+Authentication (device -> host unless noted):
+
+| Line | Meaning |
+| --- | --- |
+| `FACE_SCAN:<id>` | fingerprint matched ID `<id>`; the host must verify THAT user's face (legacy bare `FACE_SCAN` is the old PIN-first build) |
+| `FACE_VERIFIED:<id>` (host -> device) | face matched for `<id>` (read by `waitFaceVerdict`, 25 s window; a different id counts as denied) |
+| `FACE_DENIED:<id>` (host -> device) | face did not match / user unknown / disabled |
+| `AUTH_STAGE:PIN` | face accepted; the PIN prompt is on the device keypad |
+| `AUTH_OK:<id>` | all three factors passed; session open (the only success line; role is never sent) |
+| `AUTH_FAILED:<stage>` | generic failure, stage `FP`, `FACE`, `PIN` or `BOOT` - for the host AUDIT LOG only, never shown to the user. Counts toward the 3-strikes lockout (`AUTH_LOCKED`) |
+| `BOOTSTRAP_OK` | user store empty and the build-time bootstrap PIN was typed: enrollment-only session (SD commands answer `SD_ERROR:AUTH_REQUIRED`) |
+
+Enrollment / revocation (host -> device, need an access session AND local authorization: keypad `A`, 60 s, or the fresh bootstrap session):
+
+| Command | Replies |
+| --- | --- |
+| `ENROLL_FINGERPRINT:<label>` | `ENROLL:PLACE_FINGER`, `ENROLL:REMOVE_FINGER`, `ENROLL:PLACE_AGAIN`, then `ENROLL_OK:<label>:<id>` or `ENROLL_ERROR:<code>` (new code `ENROLL_ERROR:TOO_MANY_USERS`: id above 16). A successful enrollment opens a 120 s window for `SET_PIN:<id>` |
+| `SET_PIN:<id>` | the PIN is typed TWICE on the keypad; `PIN_SET_OK:<id>` or `PIN_SET_ERROR:<code>`: `PIN_SET_ERROR:INVALID_ID`, `PIN_SET_ERROR:LOCAL_AUTH_REQUIRED`, `PIN_SET_ERROR:NO_FINGERPRINT`, `PIN_SET_ERROR:TIMEOUT`, `PIN_SET_ERROR:TOO_SHORT`, `PIN_SET_ERROR:MISMATCH`, `PIN_SET_ERROR:STORE_FAILED`. PIN 4-8 digits, stored as PBKDF2-HMAC-SHA256 (5000 iterations, 16-byte salt) in flash EEPROM emulation |
+| `DELETE_USER:<id>` | deletes the fingerprint model and PIN record: `USER_DELETED:<id>` or `USER_ERROR:INVALID_ID`, `USER_ERROR:LOCAL_AUTH_REQUIRED`, `USER_ERROR:SELF` |
+
+When the last PIN record is deleted the device returns to bootstrap setup mode (physical possession + bootstrap PIN).

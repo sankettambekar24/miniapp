@@ -16,8 +16,9 @@
 #include <Adafruit_Fingerprint.h>
 
 // ---- HSS-S3: build configuration ------------------------------------------------
-#define HSS_FW_VERSION "0.3.0-stage3"
-// 0 = PIN-only authentication (default). 1 = legacy PIN -> face -> fingerprint sequence.
+#define HSS_FW_VERSION "0.4.0-stage6"
+// 0 = PIN-only authentication (default, test mode). 1 = THREE-FACTOR: fingerprint -> face (host) -> per-user PIN
+// (docs/THREE_FACTOR_DESIGN.md).
 // Face/fingerprint code stays compiled in either way; with 0 it is simply not invoked
 // for authentication. Build with:  --build-property "build.extra_flags=-DHSS_REQUIRE_FACTORS=1"
 #ifndef HSS_REQUIRE_FACTORS
@@ -26,6 +27,10 @@
 // pins_local.h defines HSS_PIN_SLOT1 / HSS_PIN_SLOT2 (digit strings). It is NOT committed.
 // Copy pins_local.example.h to pins_local.h (build.ps1 does this with random test PINs).
 #include "pins_local.h"
+#if HSS_REQUIRE_FACTORS
+#include <EEPROM.h>
+#include "hss_crypto.h"
+#endif
 
 // Set to 1 only if your installed SD library supports SD.end().
 #define USE_SD_END 0
@@ -84,6 +89,32 @@ unsigned long lastAuthorizedActivity = 0;
 bool enrollmentAuthorized = false;
 unsigned long enrollmentAuthorizedAt = 0;
 bool discardHostCommand = false;
+// Three-factor build state (declared unconditionally so shared helpers compile in both builds).
+bool bootstrapSession = false;  // enrollment-only session opened by the bootstrap PIN while the user store is empty
+bool haveUsers = false;
+uint8_t pendingPinId = 0;
+unsigned long pendingPinAt = 0;
+bool registerFailure(const char* eventName);
+uint8_t matchedSlot();
+void clearPIN();
+#if HSS_REQUIRE_FACTORS
+// Types/constants live up here so the Arduino auto-generated prototypes can see them.
+const uint8_t MAX_USERS = 16;                       // fingerprint IDs 1..MAX_USERS
+const uint32_t PIN_KDF_ITER = 5000;
+const uint8_t USER_PIN_MIN = 4, USER_PIN_MAX = 8;
+const uint8_t REC_MAGIC = 0xA5;
+const int EE_BASE = 16;
+const unsigned long FACE_WAIT_MS = 25000UL, PIN_WAIT_MS = 30000UL, PENDING_PIN_MS = 120000UL;
+
+struct PinRecord {
+  uint8_t magic;
+  uint8_t reserved[3];
+  uint32_t iter;
+  uint8_t salt[16];
+  uint8_t hash[32];
+};
+
+#endif
 
 // Host file-transfer command buffer. Commands are accepted only during an
 // authenticated STM32 session. Relative paths may include subdirectories.
@@ -358,6 +389,8 @@ void clearEnrollmentAuthorization() {
 void revokeAccessSession(const char* eventName) {
   bool wasActive = accessSession;
   accessSession = false;
+  bootstrapSession = false;
+  pendingPinId = 0;
   activeSlot = 0;
   lastAuthorizedActivity = 0;
   clearEnrollmentAuthorization();
@@ -741,6 +774,13 @@ void enrollFingerprintFromHost(const char* username) {
   // Select the destination ID before createModel(), and never load a model
   // between createModel() and storeModel().
   int id = findFreeFingerprintSlot();
+#if HSS_REQUIRE_FACTORS
+  if (id > (int)MAX_USERS) {
+    Serial.println("ENROLL_ERROR:TOO_MANY_USERS");
+    showMessage("ENROLL", "USER LIMIT");
+    return;
+  }
+#endif
   if (id < 1) {
     Serial.println("ENROLL_ERROR:NO_FREE_SLOT_OR_COUNT_READ");
     showMessage("ENROLL", "SLOT ERROR");
@@ -846,6 +886,10 @@ void enrollFingerprintFromHost(const char* username) {
   Serial.print(username);
   Serial.print(":");
   Serial.println(id);
+#if HSS_REQUIRE_FACTORS
+  pendingPinId = (uint8_t)id;  // the host may now run SET_PIN:<id> for this fresh template (120 s)
+  pendingPinAt = millis();
+#endif
 
   uint8_t countStatus = finger.getTemplateCount();
   Serial.print("DBG: FP_TEMPLATE_COUNT_AFTER_ENROLL=");
@@ -865,6 +909,275 @@ void enrollFingerprintFromHost(const char* username) {
   showMessage("ENROLL", "SUCCESS");
 }
 
+#if HSS_REQUIRE_FACTORS
+// ============ Three-factor authentication: fingerprint (device) -> face (host) -> PIN (device) ============
+// See docs/THREE_FACTOR_DESIGN.md. The PIN is set on this keypad and stored ONLY as a salted PBKDF2-HMAC-SHA256
+// record in internal flash (EEPROM emulation), never as plaintext and never on the SD card.
+uint32_t saltCounter = 0;
+unsigned long lastFingerPoll = 0;
+
+bool validUserId(long id) { return id >= 1 && id <= (long)MAX_USERS; }
+int recordAddr(uint8_t id) { return EE_BASE + (int)(id - 1) * (int)sizeof(PinRecord); }
+
+bool readRecord(uint8_t id, PinRecord& r) {
+  if (!validUserId(id)) return false;
+  EEPROM.get(recordAddr(id), r);
+  return r.magic == REC_MAGIC && r.iter >= 1000 && r.iter <= 100000;
+}
+
+bool writeRecord(uint8_t id, PinRecord& r) {
+  EEPROM.put(recordAddr(id), r);
+  eeprom_buffer_flush();
+  PinRecord back;
+  EEPROM.get(recordAddr(id), back);
+  return memcmp(&back, &r, sizeof(r)) == 0;
+}
+
+void eraseRecord(uint8_t id) {
+  PinRecord blank;
+  memset(&blank, 0xFF, sizeof(blank));
+  EEPROM.put(recordAddr(id), blank);
+  eeprom_buffer_flush();
+}
+
+bool anyUserRecord() {
+  PinRecord r;
+  for (uint8_t id = 1; id <= MAX_USERS; id++) if (readRecord(id, r)) return true;
+  return false;
+}
+
+// F401 has no hardware RNG: the salt only has to be UNIQUE per record (it is not secret).
+void makeSalt(uint8_t salt[16]) {
+  uint8_t seed[24];
+  uint32_t words[6] = {HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2(), (uint32_t)micros(), (uint32_t)millis(), saltCounter++};
+  memcpy(seed, words, sizeof(words));
+  uint8_t digest[32];
+  hss_sha256(seed, sizeof(seed), digest);
+  memcpy(salt, digest, 16);
+}
+
+void showIdleScreen() {
+  if (!haveUsers) showMessage("SETUP", "ENTER PIN");
+  else showMessage("PLACE", "FINGER");
+}
+
+void showPinPrompt(const char* title, uint8_t n) {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.println(title);
+  display.setCursor(0, 32);
+  if (n == 0) display.println("_");
+  else for (uint8_t i = 0; i < n; i++) display.print('*');
+  display.display();
+}
+
+// Reads digits until '#'. '*' clears, 'C' cancels. Returns true only for a non-empty PIN entered with '#'.
+bool readPinFromKeypad(char* out, uint8_t& len, const char* title, unsigned long timeoutMs) {
+  len = 0;
+  out[0] = '\0';
+  unsigned long last = millis();
+  showPinPrompt(title, 0);
+  while (millis() - last < timeoutMs) {
+    char k = scanKeypad();
+    if (k == '\0') { delay(5); continue; }
+    last = millis();
+    if (k >= '0' && k <= '9') {
+      if (len < USER_PIN_MAX) { out[len++] = k; out[len] = '\0'; }
+      showPinPrompt(title, len);
+    } else if (k == '*') {
+      len = 0; out[0] = '\0';
+      showPinPrompt(title, 0);
+    } else if (k == 'C') {
+      return false;
+    } else if (k == '#') {
+      if (len > 0) return true;
+    }
+  }
+  return false;
+}
+
+bool verifyUserPin(uint8_t id, const char* pin, uint8_t len) {
+  PinRecord r;
+  uint8_t salt[16], derived[32];
+  bool have = readRecord(id, r);
+  if (!have) {  // same work as a real check so timing does not reveal whether the account has a PIN
+    makeSalt(salt);
+    hss_pbkdf2_sha256((const uint8_t*)pin, len, salt, 16, PIN_KDF_ITER, derived);
+    return false;
+  }
+  hss_pbkdf2_sha256((const uint8_t*)pin, len, r.salt, 16, r.iter, derived);
+  return hss_ct_equal(derived, r.hash, 32);
+}
+
+bool storeUserPin(uint8_t id, const char* pin, uint8_t len) {
+  PinRecord r;
+  memset(&r, 0, sizeof(r));
+  r.magic = REC_MAGIC;
+  r.iter = PIN_KDF_ITER;
+  makeSalt(r.salt);
+  hss_pbkdf2_sha256((const uint8_t*)pin, len, r.salt, 16, r.iter, r.hash);
+  return writeRecord(id, r);
+}
+
+// Generic failure: the stage goes to the host audit log only (the desktop UI shows one generic message).
+void failAuth(const char* stage) {
+  Serial.print("AUTH_FAILED:");
+  Serial.println(stage);
+  char ev[24];
+  snprintf(ev, sizeof(ev), "AUTH_FAILED_%s", stage);
+  showMessage("ACCESS", "DENIED");
+  bool locked = registerFailure(ev);  // counts toward the 3-strikes lockout (prints AUTH_LOCKED)
+  if (!locked) { delay(1500); showIdleScreen(); }
+}
+
+bool waitFaceVerdict(uint8_t id) {
+  showMessage("FACE", "LOOK AT PC");
+  flushSerialInput();
+  Serial.print("FACE_SCAN:");
+  Serial.println(id);
+  char okLine[24], noLine[24];
+  snprintf(okLine, sizeof(okLine), "FACE_VERIFIED:%u", (unsigned)id);
+  snprintf(noLine, sizeof(noLine), "FACE_DENIED:%u", (unsigned)id);
+  char line[32];
+  uint8_t n = 0;
+  unsigned long t0 = millis();
+  while (millis() - t0 < FACE_WAIT_MS) {
+    while (Serial.available()) {
+      char c = (char)Serial.read();
+      if (c == '\r') continue;
+      if (c == '\n') {
+        line[n] = '\0';
+        n = 0;
+        if (strcmp(line, okLine) == 0) { logEvent("FACE_VERIFIED"); return true; }
+        if (strncmp(line, "FACE_", 5) == 0) { logEvent("FACE_DENIED"); return false; }  // denied OR a different id
+      } else if (n < sizeof(line) - 1) {
+        line[n++] = c;
+      } else {
+        n = 0;
+      }
+    }
+    delay(10);
+  }
+  logEvent("FACE_TIMEOUT");
+  return false;
+}
+
+void threeFactorPoll() {
+  if (millis() - lastFingerPoll < 150UL) return;
+  lastFingerPoll = millis();
+  if (finger.getImage() != FINGERPRINT_OK) return;  // no finger
+  showMessage("FINGER", "READING");
+  if (finger.image2Tz(1) != FINGERPRINT_OK) { failAuth("FP"); return; }
+  uint8_t r = finger.fingerFastSearch();
+  if (r != FINGERPRINT_OK || !validUserId(finger.fingerID)) { failAuth("FP"); return; }
+  uint8_t id = (uint8_t)finger.fingerID;
+  if (!waitFaceVerdict(id)) { failAuth("FACE"); return; }
+  Serial.println("AUTH_STAGE:PIN");
+  char pin[USER_PIN_MAX + 1];
+  uint8_t len = 0;
+  bool got = readPinFromKeypad(pin, len, "ENTER PIN", PIN_WAIT_MS);
+  bool ok = got && verifyUserPin(id, pin, len);
+  memset(pin, 0, sizeof(pin));
+  if (!ok) { failAuth("PIN"); return; }
+  wrongAttempts = 0;
+  bootstrapSession = false;
+  accessSession = true;
+  activeSlot = id;
+  lastAuthorizedActivity = millis();
+  clearEnrollmentAuthorization();
+  showMessage("ACCESS", "GRANTED");
+  Serial.print("AUTH_OK:");
+  Serial.println(id);
+  logEvent("ACCESS_GRANTED");
+  delay(1500);
+  showAccessMenu();
+}
+
+// Empty store only: the build-time bootstrap PIN (HSS_PIN_SLOT1) opens an ENROLLMENT-ONLY session (no SD access).
+void bootstrapAuth() {
+  bool ok = (matchedSlot() == 1);
+  clearPIN();
+  if (!ok) { failAuth("BOOT"); return; }
+  wrongAttempts = 0;
+  accessSession = true;
+  bootstrapSession = true;
+  activeSlot = 0;
+  lastAuthorizedActivity = millis();
+  enrollmentAuthorized = true;
+  enrollmentAuthorizedAt = millis();
+  Serial.println("BOOTSTRAP_OK");
+  logEvent("BOOTSTRAP_OK");
+  showMessage("SETUP", "ENROLL ADMIN");
+}
+
+void setPinFromHost(const char* arg) {
+  char* end = nullptr;
+  long id = strtol(arg, &end, 10);
+  if (end == arg || *end != '\0' || !validUserId(id)) { Serial.println("PIN_SET_ERROR:INVALID_ID"); return; }
+  unsigned long now = millis();
+  bool viaEnroll = (pendingPinId == (uint8_t)id) && (now - pendingPinAt < PENDING_PIN_MS);
+  bool viaAuth = enrollmentAuthorized && (now - enrollmentAuthorizedAt < ENROLL_AUTH_TIMEOUT_MS);
+  if (!accessSession || lockedOut || !(viaEnroll || viaAuth)) {
+    Serial.println("PIN_SET_ERROR:LOCAL_AUTH_REQUIRED");
+    logEvent("HOST_SET_PIN_BLOCKED");
+    return;
+  }
+  if (finger.loadModel((uint16_t)id) != FINGERPRINT_OK) { Serial.println("PIN_SET_ERROR:NO_FINGERPRINT"); return; }
+  touchAuthorizedSession();
+  char p1[USER_PIN_MAX + 1], p2[USER_PIN_MAX + 1];
+  uint8_t l1 = 0, l2 = 0;
+  bool a = readPinFromKeypad(p1, l1, "NEW PIN", PIN_WAIT_MS);
+  if (!a) { memset(p1, 0, sizeof(p1)); Serial.println("PIN_SET_ERROR:TIMEOUT"); showMessage("PIN", "CANCELLED"); delay(1000); showAccessMenu(); return; }
+  if (l1 < USER_PIN_MIN) { memset(p1, 0, sizeof(p1)); Serial.println("PIN_SET_ERROR:TOO_SHORT"); showMessage("PIN", "TOO SHORT"); delay(1000); showAccessMenu(); return; }
+  bool b = readPinFromKeypad(p2, l2, "CONFIRM PIN", PIN_WAIT_MS);
+  bool same = b && l1 == l2 && memcmp(p1, p2, l1) == 0;
+  if (!b) { memset(p1, 0, sizeof(p1)); memset(p2, 0, sizeof(p2)); Serial.println("PIN_SET_ERROR:TIMEOUT"); showAccessMenu(); return; }
+  if (!same) { memset(p1, 0, sizeof(p1)); memset(p2, 0, sizeof(p2)); Serial.println("PIN_SET_ERROR:MISMATCH"); showMessage("PIN", "MISMATCH"); delay(1000); showAccessMenu(); return; }
+  bool stored = storeUserPin((uint8_t)id, p1, l1);
+  memset(p1, 0, sizeof(p1));
+  memset(p2, 0, sizeof(p2));
+  if (!stored) { Serial.println("PIN_SET_ERROR:STORE_FAILED"); showMessage("PIN", "STORE ERROR"); delay(1000); showAccessMenu(); return; }
+  clearEnrollmentAuthorization();
+  pendingPinId = 0;
+  haveUsers = true;
+  logEvent("USER_PIN_SET");
+  Serial.print("PIN_SET_OK:");
+  Serial.println(id);
+  showMessage("PIN", "SAVED");
+  delay(1000);
+  if (bootstrapSession) {  // setup finished: the enrollment-only session ends; the normal 3-factor login takes over
+    revokeAccessSession("BOOTSTRAP_DONE");
+    showIdleScreen();
+  } else {
+    showAccessMenu();
+  }
+}
+
+void deleteUserFromHost(const char* arg) {
+  char* end = nullptr;
+  long id = strtol(arg, &end, 10);
+  if (end == arg || *end != '\0' || !validUserId(id)) { Serial.println("USER_ERROR:INVALID_ID"); return; }
+  if (!accessSession || lockedOut || bootstrapSession || !enrollmentAuthorized ||
+      (millis() - enrollmentAuthorizedAt >= ENROLL_AUTH_TIMEOUT_MS)) {
+    clearEnrollmentAuthorization();
+    Serial.println("USER_ERROR:LOCAL_AUTH_REQUIRED");
+    logEvent("HOST_DELETE_USER_BLOCKED");
+    return;
+  }
+  clearEnrollmentAuthorization();
+  if ((uint8_t)id == activeSlot) { Serial.println("USER_ERROR:SELF"); return; }
+  uint8_t d = finger.deleteModel((uint16_t)id);
+  eraseRecord((uint8_t)id);
+  haveUsers = anyUserRecord();
+  logEvent("USER_DELETED");
+  if (d != FINGERPRINT_OK) Serial.println("DBG: FP_DELETE_MODEL_NOT_OK");
+  Serial.print("USER_DELETED:");
+  Serial.println(id);
+}
+#endif  // HSS_REQUIRE_FACTORS
+
 void dispatchHostCommand(const char* command) {
   // HSS-S3: VERSION is answered even when locked or unauthenticated; it reveals no data and lets the
   // desktop identify the protocol generation (FIRMWARE_ANALYSIS.md conflict 9: flashed build unproven).
@@ -872,14 +1185,29 @@ void dispatchHostCommand(const char* command) {
     Serial.print("HSS_FW:");
     Serial.print(HSS_FW_VERSION);
     Serial.print(":AUTH=");
-    Serial.print(HSS_REQUIRE_FACTORS ? "PIN_FACE_FP" : "PIN_ONLY");
-    Serial.println(":SLOTS=2:REQID=1");
+    Serial.print(HSS_REQUIRE_FACTORS ? "THREE_FACTOR" : "PIN_ONLY");
+    Serial.println(HSS_REQUIRE_FACTORS ? ":SLOTS=16:REQID=1" : ":SLOTS=2:REQID=1");
     return;
   }
   if (lockedOut) {
     Serial.println("SD_ERROR:LOCKED_OUT");
     return;
   }
+#if HSS_REQUIRE_FACTORS
+  if (bootstrapSession && strncmp(command, "ENROLL_FINGERPRINT:", 19) != 0 && strncmp(command, "SET_PIN:", 8) != 0 &&
+      strcmp(command, "END_SESSION") != 0) {
+    Serial.println("SD_ERROR:AUTH_REQUIRED");  // bootstrap session is enrollment-only: no SD access
+    return;
+  }
+  if (strncmp(command, "SET_PIN:", 8) == 0) {
+    setPinFromHost(command + 8);
+    return;
+  }
+  if (strncmp(command, "DELETE_USER:", 12) == 0) {
+    deleteUserFromHost(command + 12);
+    return;
+  }
+#endif
   if (strcmp(command, "END_SESSION") == 0) {
     revokeAccessSession("ACCESS_SESSION_ENDED_BY_HOST");
     showMessage("SESSION", "ENDED");
@@ -1148,7 +1476,13 @@ void setup() {
   }
   Serial.println("DBG: SYSTEM READY");
   logEvent("SYSTEM_READY");
+#if HSS_REQUIRE_FACTORS
+  haveUsers = anyUserRecord();
+  Serial.println(haveUsers ? "DBG: USERS ENROLLED" : "DBG: NO USERS (bootstrap setup mode)");
+  showIdleScreen();
+#else
   showEnterPIN();
+#endif
 }
 
 // ---------------- Main loop ----------------
@@ -1161,6 +1495,9 @@ void loop() {
     return;
   }
 
+#if HSS_REQUIRE_FACTORS
+  if (!accessSession && haveUsers) threeFactorPoll();  // fingerprint -> face -> PIN; the keypad is read inside
+#endif
   char key = scanKeypad();
   if (key == '\0') return;
 
@@ -1169,7 +1506,7 @@ void loop() {
 
   if (accessSession) {
     if (key == 'D') {
-      readProtectedFile();
+      if (!bootstrapSession) readProtectedFile();
     } else if (key == 'A') {
       enrollmentAuthorized = true;
       enrollmentAuthorizedAt = millis();
@@ -1188,6 +1525,9 @@ void loop() {
     return;
   }
 
+#if HSS_REQUIRE_FACTORS
+  if (haveUsers) return;  // normal operation: no keypad login outside threeFactorPoll()
+#endif
   if (key >= '0' && key <= '9') {
     if (pinLen < MAX_PIN_LEN) {
       enteredPIN[pinLen++] = key;
@@ -1198,7 +1538,12 @@ void loop() {
     clearPIN();
     showEnterPIN();
   } else if (key == '#') {
+#if HSS_REQUIRE_FACTORS
+    bootstrapAuth();
+    if (!lockedOut && !accessSession) showIdleScreen();
+#else
     authenticate();
     if (!lockedOut && !accessSession) showEnterPIN();
+#endif
   }
 }

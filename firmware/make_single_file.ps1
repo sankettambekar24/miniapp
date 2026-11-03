@@ -11,5 +11,7 @@ if ($ino -notmatch '#include "pins_local.h"') { throw "repo sketch has no pins_l
 $out = Join-Path $fw "single_file\hss_firmware_single"
 New-Item -ItemType Directory -Force $out | Out-Null
 $single = $ino.Replace('#include "pins_local.h"', "// ---- inlined from pins_local.h (do not commit this file) ----`n" + $pins.TrimEnd())
+$crypto = Get-Content (Join-Path $fw "hss_firmware\hss_crypto.h") -Raw
+$single = $single.Replace('#include "hss_crypto.h"', "// ---- inlined from hss_crypto.h ----`n" + $crypto.TrimEnd())
 Set-Content (Join-Path $out "hss_firmware_single.ino") $single -Encoding utf8
 Write-Host "Wrote $out\hss_firmware_single.ino"

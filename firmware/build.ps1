@@ -1,6 +1,7 @@
 <#
   Build the HSS firmware with the project-local Arduino CLI (tools\arduino-cli, STM32duino core).
-  Default: PIN-only build (HSS_REQUIRE_FACTORS=0). Use -Factors for the legacy PIN -> face -> fingerprint build.
+  Default: PIN-only build (HSS_REQUIRE_FACTORS=0). Use -Factors for the THREE-FACTOR build (fingerprint -> face -> per-user PIN; docs/THREE_FACTOR_DESIGN.md).
+  Outputs: build\pinonly\ or buildactors\ (never mixed).
 
   First run creates firmware\hss_firmware\pins_local.h (git-ignored) with two random distinct 4-digit test PINs.
   The PINs are NOT printed; read them from that file on your own machine (slot 1 = admin test, slot 2 = user test)
@@ -17,7 +18,7 @@ $root  = Split-Path -Parent $PSScriptRoot
 $cli   = Join-Path $root "tools\arduino-cli\arduino-cli.exe"
 $cfg   = Join-Path $root "tools\arduino-data\arduino-cli.yaml"
 $sketch = Join-Path $PSScriptRoot "hss_firmware"
-$out   = Join-Path $PSScriptRoot "build"
+$out   = Join-Path $PSScriptRoot $(if ($Factors) { "buildactors" } else { "build\pinonly" })
 $pins  = Join-Path $sketch "pins_local.h"
 
 if (-not (Test-Path $cli)) { throw "arduino-cli not found at $cli (see docs/TOOLCHAIN.md)" }
@@ -35,7 +36,7 @@ if (-not (Test-Path $pins)) {
 $flags = "-DENABLE_HWSERIAL2 " + $(if ($Factors) { "-DHSS_REQUIRE_FACTORS=1" } else { "-DHSS_REQUIRE_FACTORS=0" })
 New-Item -ItemType Directory -Force $out | Out-Null
 Write-Host "FQBN : $Fqbn"
-Write-Host "Build: $(if ($Factors) {'PIN -> face -> fingerprint (HSS_REQUIRE_FACTORS=1)'} else {'PIN-only (HSS_REQUIRE_FACTORS=0)'})"
+Write-Host "Build: $(if ($Factors) {'THREE-FACTOR fingerprint -> face -> PIN (HSS_REQUIRE_FACTORS=1)'} else {'PIN-only (HSS_REQUIRE_FACTORS=0)'})"
 & $cli --config-file $cfg compile --clean --fqbn $Fqbn --build-property "compiler.cpp.extra_flags=$flags" --output-dir $out $sketch
 if ($LASTEXITCODE -ne 0) { throw "compile failed (exit $LASTEXITCODE)" }
 $bin = Join-Path $out "hss_firmware.ino.bin"

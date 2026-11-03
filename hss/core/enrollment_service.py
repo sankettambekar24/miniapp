@@ -23,6 +23,7 @@ ENROLL_TEXT = {
     "INVALID_USERNAME": "The device rejected the label.",
     "NO_FREE_SLOT_OR_COUNT_READ": "The fingerprint sensor has no free slot or could not be read.",
     "TOO_MANY_USERS": "The device supports at most 16 users.",
+    "ALREADY_ENROLLED": "This finger is already stored on the device (for this or another user). Use a different finger, or revoke the old user first.",
     "FIRST_IMAGE": "First fingerprint scan failed. Try again.", "SECOND_IMAGE": "Second fingerprint scan failed. Try again.",
     "FIRST_TIMEOUT": "No finger detected in time.", "SECOND_TIMEOUT": "No finger detected in time (second scan).",
     "REMOVE_TIMEOUT": "Finger was not lifted in time.", "FINGER_MISMATCH": "The two scans did not match. Try again.",

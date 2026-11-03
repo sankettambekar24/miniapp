@@ -207,3 +207,15 @@ def test_free_slot_probe_treats_clone_empty_code_as_free():
     assert "if (result == FINGERPRINT_OK) continue;" in body
     assert "maxSlots = MAX_USERS" in body          # three-factor IDs stay within 1..16
     assert "return -1;\n  }\n\n  // Probe" not in body  # a failed capacity read no longer aborts enrollment
+
+
+def test_stale_templates_cannot_shadow_enrolled_users():
+    """Regression (first three-factor hardware run): old templates in slots 1-10 matched before the user's new slot 11."""
+    assert "void deleteOrphanTemplates()" in SRC and "if (haveUsers) deleteOrphanTemplates();" in SRC
+    orphan = SRC[SRC.index("void deleteOrphanTemplates()"):SRC.index("void showIdleScreen()")]
+    assert orphan.index("readRecord(id, r)) continue;") < orphan.index("finger.deleteModel(id)")   # never deletes a real user
+    boot = SRC[SRC.index("void bootstrapAuth()"):SRC.index("void setPinFromHost")]
+    assert boot.index("if (!ok) { failAuth(\"BOOT\"); return; }") < boot.index("finger.emptyDatabase()")  # only after the PIN
+    enroll = SRC[SRC.index("void enrollFingerprintFromHost"):]
+    assert enroll.index("finger.fingerFastSearch() == FINGERPRINT_OK") < enroll.index('"ENROLL:REMOVE_FINGER"')
+    assert '"ENROLL_ERROR:ALREADY_ENROLLED"' in SRC

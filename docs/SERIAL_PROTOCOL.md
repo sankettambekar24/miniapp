@@ -103,8 +103,10 @@ Enrollment / revocation (host -> device, need an access session AND local author
 
 | Command | Replies |
 | --- | --- |
-| `ENROLL_FINGERPRINT:<label>` | `ENROLL:PLACE_FINGER`, `ENROLL:REMOVE_FINGER`, `ENROLL:PLACE_AGAIN`, then `ENROLL_OK:<label>:<id>` or `ENROLL_ERROR:<code>` (new code `ENROLL_ERROR:TOO_MANY_USERS`: id above 16). A successful enrollment opens a 120 s window for `SET_PIN:<id>` |
+| `ENROLL_FINGERPRINT:<label>` | `ENROLL:PLACE_FINGER`, `ENROLL:REMOVE_FINGER`, `ENROLL:PLACE_AGAIN`, then `ENROLL_OK:<label>:<id>` or `ENROLL_ERROR:<code>` (new code `ENROLL_ERROR:TOO_MANY_USERS`: id above 16); `ENROLL_ERROR:ALREADY_ENROLLED`: this finger already matches a stored template (one finger can never belong to two IDs). A successful enrollment opens a 120 s window for `SET_PIN:<id>` |
 | `SET_PIN:<id>` | the PIN is typed TWICE on the keypad; `PIN_SET_OK:<id>` or `PIN_SET_ERROR:<code>`: `PIN_SET_ERROR:INVALID_ID`, `PIN_SET_ERROR:LOCAL_AUTH_REQUIRED`, `PIN_SET_ERROR:NO_FINGERPRINT`, `PIN_SET_ERROR:TIMEOUT`, `PIN_SET_ERROR:TOO_SHORT`, `PIN_SET_ERROR:MISMATCH`, `PIN_SET_ERROR:STORE_FAILED`. PIN 4-8 digits, stored as PBKDF2-HMAC-SHA256 (5000 iterations, 16-byte salt) in flash EEPROM emulation |
 | `DELETE_USER:<id>` | deletes the fingerprint model and PIN record: `USER_DELETED:<id>` or `USER_ERROR:INVALID_ID`, `USER_ERROR:LOCAL_AUTH_REQUIRED`, `USER_ERROR:SELF` |
 
 When the last PIN record is deleted the device returns to bootstrap setup mode (physical possession + bootstrap PIN).
+
+Boot (three-factor build, users present): templates in slots 1..16 with no PIN record are deleted (`DBG: FP_ORPHAN_TEMPLATES_DELETED=<n>`). Bootstrap (`BOOTSTRAP_OK`) first empties the whole sensor library (`DBG: FP_LIBRARY_EMPTIED_STATUS=<code>`).

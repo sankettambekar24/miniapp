@@ -824,6 +824,18 @@ void enrollFingerprintFromHost(const char* username) {
     Serial.println("ENROLL_ERROR:FIRST_PROCESS");
     return;
   }
+#if HSS_REQUIRE_FACTORS
+  // HSS-S6 FIX (first three-factor hardware run): a finger that already matches a stored template must not be
+  // enrolled again: the search would keep returning the OLD id and the new user could never log in.
+  // fingerFastSearch only reads char buffer 1, so the enrollment buffer is unchanged.
+  if (finger.fingerFastSearch() == FINGERPRINT_OK) {
+    Serial.print("DBG: FP_ALREADY_STORED_ID=");
+    Serial.println(finger.fingerID);
+    Serial.println("ENROLL_ERROR:ALREADY_ENROLLED");
+    showMessage("FINGER", "ALREADY USED");
+    return;
+  }
+#endif
 
   showMessage("ENROLL", "REMOVE FINGER");
   Serial.println("ENROLL:REMOVE_FINGER");
@@ -964,6 +976,22 @@ void makeSalt(uint8_t salt[16]) {
   uint8_t digest[32];
   hss_sha256(seed, sizeof(seed), digest);
   memcpy(salt, digest, 16);
+}
+
+// HSS-S6 FIX (first three-factor hardware run): templates left on the AS608 by earlier firmware (or an aborted
+// enrollment) shadow real users: the search matched an old slot (1, 2) instead of the user's new slot (11).
+// A template in 1..MAX_USERS WITHOUT a PIN record can never log in, so it is removed at boot.
+void deleteOrphanTemplates() {
+  uint8_t removed = 0;
+  PinRecord r;
+  for (uint8_t id = 1; id <= MAX_USERS; id++) {
+    if (readRecord(id, r)) continue;                      // a real user: keep
+    if (finger.loadModel(id) == FINGERPRINT_OK) {         // template present but no PIN record: orphan
+      if (finger.deleteModel(id) == FINGERPRINT_OK) removed++;
+    }
+  }
+  Serial.print("DBG: FP_ORPHAN_TEMPLATES_DELETED=");
+  Serial.println(removed);
 }
 
 void showIdleScreen() {
@@ -1111,6 +1139,9 @@ void bootstrapAuth() {
   clearPIN();
   if (!ok) { failAuth("BOOT"); return; }
   wrongAttempts = 0;
+  uint8_t wiped = finger.emptyDatabase();                 // HSS-S6: setup starts with an empty sensor library
+  Serial.print("DBG: FP_LIBRARY_EMPTIED_STATUS=");
+  Serial.println(wiped);
   accessSession = true;
   bootstrapSession = true;
   activeSlot = 0;
@@ -1489,6 +1520,7 @@ void setup() {
 #if HSS_REQUIRE_FACTORS
   haveUsers = anyUserRecord();
   Serial.println(haveUsers ? "DBG: USERS ENROLLED" : "DBG: NO USERS (bootstrap setup mode)");
+  if (haveUsers) deleteOrphanTemplates();
   showIdleScreen();
 #else
   showEnterPIN();

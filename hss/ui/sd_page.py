@@ -71,6 +71,7 @@ class _Bridge(QObject):
 class SdPage(QWidget):
     _after_probe = None
     _cur: str | None = None
+    _notice = ""
 
     def __init__(self, ctl, ctx=None):
         super().__init__()
@@ -306,14 +307,16 @@ class SdPage(QWidget):
             extra = f" ({v.skipped} entries skipped: unsupported names)" if v.skipped else ""
             if v.hidden:
                 extra += f" ({v.hidden} hidden: no LIST permission)"
-            self.status.setText(f"{len(self.paths)} file(s) on the SD card{extra}.")
+            self.status.setText((self._notice + " " if self._notice else "") + f"{len(self.paths)} file(s) on the SD card{extra}.")
+            self._notice = ""
         elif kind == "preview":
             self.pane.show_preview(v.path, build_preview(v.path, v.data))
             self.status.setText(f"Previewed {v.path} ({v.size} bytes).")
         elif kind == "download":
             self.status.setText(f"Downloaded {v.path} ({v.size} bytes) to {v.dest_path}.")
         elif kind == "upload":
-            self.status.setText(f"Uploaded {v.name} ({v.size} bytes, {v.chunks} chunk(s)); the device verified the size.")
+            self._notice = f"Uploaded {v.name} ({v.size} bytes, {v.chunks} chunk(s)); the device verified the size (SD_WRITE_OK)."
+            self.status.setText(self._notice)
             self._list()
             return
         else:

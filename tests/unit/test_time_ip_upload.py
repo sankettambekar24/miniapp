@@ -225,3 +225,66 @@ def test_disconnect_mid_upload_reports_disconnected(tmp_path):
         r.clock.advance(1.0)
         r.manager.pump()
     assert out and out[0].error.code in (SdErrorCode.DISCONNECTED, SdErrorCode.TIMEOUT)
+
+
+# ---------------------------------------------------------------- upload: success only on SD_WRITE_OK, through the page
+def test_success_only_on_sd_write_ok(tmp_path):
+    r = admin_rig()
+    orig = r.fw._line_out
+    r.fw._line_out = lambda t: None if t.startswith("SD_WRITE_OK") else orig(t)     # device never confirms
+    src = tmp_path / "f.bin"
+    src.write_bytes(b"z" * 700)
+    res = r.run(lambda cb: r.svc.upload(src, "F.BIN", None, cb), max_pumps=5000)
+    assert not res.ok, "upload must NOT be reported successful without SD_WRITE_OK"
+    assert res.error.code in (SdErrorCode.TIMEOUT, SdErrorCode.PARTIAL_LEFT, SdErrorCode.PROTOCOL, SdErrorCode.SIZE_MISMATCH)
+
+
+def test_wrong_size_in_sd_write_ok_is_not_success(tmp_path):
+    r = admin_rig()
+    orig = r.fw._line_out
+    r.fw._line_out = lambda t: orig(t.replace(":700", ":699")) if t.startswith("SD_WRITE_OK") else orig(t)
+    src = tmp_path / "f.bin"
+    src.write_bytes(b"z" * 700)
+    assert not r.upload(src, "F.BIN").ok
+
+
+def test_page_upload_flow_end_to_end(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
+    app = QApplication.instance() or QApplication([])
+    from hss.controller import AppController
+    from hss.core.identity import IdentityResolver
+    from hss.core.serial_manager import LineEvent
+    from hss.core.session import Identity
+    from hss.ui import sd_page as sp
+    from hss.ui.upload_dialog import UploadDialog
+
+    r = SdRig({"OLD.TXT": b"old"})
+    ctl = AppController(r.manager.config, IdentityResolver({1: Identity(1, "test-admin", "admin")}), r.manager)
+    ctl.fsm.on_connected(r.manager.conn_gen)
+    ctl.fsm.start_auth()
+    ctl.fsm.handle_line(LineEvent(r.manager.conn_gen, "AUTH_PIN_VERIFIED:1", 0.0))
+    page = sp.SdPage(ctl)
+    src = tmp_path / "Quarterly Report.txt"
+    src.write_bytes(b"hello upload" * 100)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(src), "")))
+    seen = {}
+    monkeypatch.setattr(UploadDialog, "exec", lambda self: (seen.update(name=self.device_name(), err=self.error.text(),
+                                                                         ok=self.buttons.button(self.buttons.StandardButton.Ok).isEnabled()), QDialog.Accepted)[1])
+    page.update_controls()
+    assert page.btn_up.isEnabled()
+    page.btn_up.click()
+    for _ in range(600):
+        r.manager.pump()
+        r.clock.advance(0.05)
+        app.processEvents()
+        if not page.busy and "Uploaded" in page.status.text():
+            break
+    assert seen == {"name": "QUARTERL.TXT", "err": "", "ok": True}              # suggested 8.3 name, valid
+    assert "Uploaded QUARTERL.TXT" in page.status.text() and "verified the size" in page.status.text()
+    assert r.fw.files["QUARTERL.TXT"] == src.read_bytes()                        # really on the (fake) card
+    for _ in range(300):                                                          # listing refreshed after success
+        r.manager.pump(); r.clock.advance(0.05); app.processEvents()
+        if "QUARTERL.TXT" in page.paths:
+            break
+    assert "QUARTERL.TXT" in page.paths and "OLD.TXT" in page.paths

@@ -7,7 +7,9 @@ Two visibly different modes:
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import time
+
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QPushButton,
                                QStackedWidget, QTabWidget, QVBoxLayout, QWidget)
 
@@ -136,6 +138,18 @@ class MainWindow(QMainWindow):
         self.hint_label.setStyleSheet(theme.muted_style())
         self.hint_label.setVisible(not test)
         lay.addWidget(self.hint_label)
+        # Big, explicit PIN prompt: the device only reads the keypad AFTER the face step (keys typed earlier are
+        # ignored) and waits 30 s. Without a working OLED this is the only prompt the user sees.
+        self.pin_prompt = QLabel("")
+        self.pin_prompt.setObjectName("pinPrompt")
+        self.pin_prompt.setWordWrap(True)
+        self.pin_prompt.setStyleSheet(theme.banner_style("warning") + "font-size:18px;")
+        self.pin_prompt.setVisible(False)
+        lay.addWidget(self.pin_prompt)
+        self._pin_since: float | None = None
+        self._pin_timer = QTimer(self)
+        self._pin_timer.setInterval(1000)
+        self._pin_timer.timeout.connect(self._tick_pin)
         lay.addWidget(self.state_label)
         self.camera_label = QLabel(self.ctl.face_status)
         self.camera_label.setObjectName("cameraStatus")
@@ -237,6 +251,29 @@ class MainWindow(QMainWindow):
                         f"<span style='color:{color}'>{text}</span>")
             lbl.setTextFormat(Qt.RichText)
 
+    PIN_WAIT_S = 30   # firmware PIN_WAIT_MS (inactivity; restarts on every key press)
+
+    def _tick_pin(self) -> None:
+        if self._pin_since is None:
+            self._pin_timer.stop()
+            return
+        left = max(0, self.PIN_WAIT_S - int(time.monotonic() - self._pin_since))
+        self.pin_prompt.setText(f"Now type your PIN on the device keypad and press #   ({left} s)\n"
+                                "Keys pressed before this message are ignored. * clears, C cancels.")
+
+    def _sync_pin_prompt(self) -> None:
+        active = (not self.ctl.config.test_mode and self.ctl.fsm.state is AuthState.IN_PROGRESS
+                  and self.ctl.fsm.steps.get("pin") == "active")
+        if active and self._pin_since is None:
+            self._pin_since = time.monotonic()
+            self._pin_timer.start()
+        elif not active:
+            self._pin_since = None
+            self._pin_timer.stop()
+        self.pin_prompt.setVisible(active)
+        if active:
+            self._tick_pin()
+
     def refresh(self) -> None:
         fsm, cfg = self.ctl.fsm, self.ctl.config
         test = cfg.test_mode
@@ -255,6 +292,7 @@ class MainWindow(QMainWindow):
         self.setup_btn.setVisible(not test and fsm.state is AuthState.BOOTSTRAP)
         if not test:
             self._paint_steps()
+            self._sync_pin_prompt()
             self.hint_label.setVisible(fsm.state in (AuthState.IDLE, AuthState.FAILED, AuthState.LOCKED_ON_DISCONNECT))
         ident = self.ctl.session.identity
         for row in (PAGE_ADMIN, PAGE_USER):

@@ -442,3 +442,23 @@ def test_device_refusal_includes_the_device_diagnostic_line():
     _, err = r.run_service(lambda: r.ctl.enroller.enroll_fingerprint(rec.user_id),
                            {"ENROLL_FINGERPRINT": ["DBG: FP_SLOT_PROBE_ERROR id=1 status=1", "ENROLL_ERROR:NO_FREE_SLOT_OR_COUNT_READ"]})
     assert isinstance(err, EnrollmentError) and "FP_SLOT_PROBE_ERROR id=1 status=1" in str(err)
+
+
+def test_pin_prompt_appears_only_during_the_pin_step():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from hss.ui.main_window import MainWindow
+    r, _, _ = rig_with_users()
+    w = MainWindow(r.ctl)
+    assert w.pin_prompt.isHidden()
+    r.current_face = A
+    r.start_login(1)
+    w.refresh()
+    assert w.pin_prompt.isHidden()                       # face step: not yet
+    r.say("AUTH_STAGE:PIN")
+    w.refresh()
+    assert not w.pin_prompt.isHidden() and "press #" in w.pin_prompt.text() and "(30 s)" in w.pin_prompt.text()
+    r.say("AUTH_FAILED:PIN")
+    w.refresh()
+    assert w.pin_prompt.isHidden()

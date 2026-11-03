@@ -38,10 +38,31 @@ Source: "..\dist\HSS\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdir
 Name: "{localappdata}\HSS"; Flags: uninsneveruninstall
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\HSS.exe"; Tasks: startmenuicon
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\HSS.exe"; Tasks: desktopicon
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\HSS.exe"; Tasks: startmenuicon; Check: ProgramsFolderOk
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\HSS.exe"; Tasks: desktopicon; Check: DesktopFolderOk
 
 [Run]
 Filename: "{app}\HSS.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 
 ; No [UninstallDelete] entry for {localappdata}\HSS on purpose (data preserved on uninstall).
+
+[Code]
+// A shortcut is optional: if Windows hands back an empty or missing folder (seen with a OneDrive-redirected Desktop:
+// the path resolved to "C:\" and creating C:\Hybrid Secure Storage.lnk failed with "Access is denied"), skip the
+// shortcut instead of failing the whole installation.
+function FolderUsable(const Path: String): Boolean;
+begin
+  Result := (Length(Path) > 3) and DirExists(Path);
+  if not Result then
+    Log('Shortcut skipped: folder not usable: "' + Path + '"');
+end;
+
+function DesktopFolderOk: Boolean;
+begin
+  Result := FolderUsable(ExpandConstant('{autodesktop}'));
+end;
+
+function ProgramsFolderOk: Boolean;
+begin
+  Result := FolderUsable(ExpandConstant('{autoprograms}'));
+end;

@@ -146,7 +146,7 @@ def test_user_sd_page_upload_disabled_admin_only_and_list_needs_permissions(app)
     sd.files.setRowCount(1)
     sd.files.setCurrentCell(0, 0)
     sd.update_controls()
-    assert not sd.btn_down.isEnabled() and "READ" in sd.btn_down.toolTip()   # LIST only, no READ
+    assert not sd.btn_down.isEnabled() and "permission" in sd.btn_down.toolTip()   # LIST only, no READ
     rig.ctl.grants = GrantIndex({"a.txt": frozenset({"LIST", "READ", "DOWNLOAD"})})
     sd.update_controls()
     assert sd.btn_down.isEnabled() and not sd.btn_up.isEnabled()

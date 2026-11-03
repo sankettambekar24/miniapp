@@ -220,6 +220,8 @@ class AuthFSM:
             self.steps = {s: "ok" for s in STEPS}
             self._pending_id = None
             self._set(AuthState.SESSION_ACTIVE, f"Signed in as {ident.name} ({ident.role})")
+        elif k is EventKind.AUTH_OK:
+            self._stale()   # AUTH_OK outside an in-progress login (no FACE_SCAN seen): ignored, never a session
         elif k is EventKind.AUTH_FAILED:
             if st is AuthState.SESSION_ACTIVE:
                 self._stale()

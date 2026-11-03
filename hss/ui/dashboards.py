@@ -1,9 +1,10 @@
-"""Admin and User dashboards. The role comes ONLY from the PIN session identity (local identity file).
+"""Admin and User dashboards. The role comes ONLY from the enrollment record of the AUTH_OK:<id> user (production)
+or the local identity file (explicit PIN test mode).
 
 Every visible control either performs a real action or is disabled with a tooltip stating why.
-Backend features need the backend password session; the backend cannot verify hardware factors
-(BLOCKED, docs/BACKEND_ANALYSIS.md s3), so that sign-in is separate from, and never implied by, the PIN session.
-No fabricated data: with no backend sign-in the tables are empty and say so.
+Backend features need the separate admin "Backend connection" service sign-in; the backend cannot verify hardware
+factors (BLOCKED, docs/BACKEND_ANALYSIS.md s3), so it is never implied by the device login.
+No fabricated data: without that connection the backend tables are empty and say so.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from ..core.services import MAX_USERNAME, MIN_PASSWORD, ServiceError, validate_p
 from . import theme
 from .async_util import Runner
 
-SIGN_IN_REASON = "Requires a signed-in backend session (password login)."
+SIGN_IN_REASON = "Requires the admin Backend connection (service sign-in, tab \"Backend connection\")."
 HW_BLOCKED = ("BLOCKED: the backend cannot verify hardware factors (factor reports are stored verified=false; "
               "complete always returns 409).")
 
@@ -32,6 +33,7 @@ class Ctx(QObject):
     """Shared state for dashboard widgets."""
     backend_changed = Signal()
     wait_message = Signal(str)
+    backend_status = Signal(str, str)
 
     def __init__(self, ctl: AppController):
         super().__init__()
@@ -40,38 +42,17 @@ class Ctx(QObject):
         ctl.on_backend_wait = lambda attempt, secs, reason: self.wait_message.emit(
             f"Backend is waking up ({reason}); retry {attempt} in {secs:.0f}s ...")
 
+        def relay(status, detail):
+            try:
+                self.backend_status.emit(status, detail)
+            except RuntimeError:
+                pass  # this dashboard was already destroyed
+
+        ctl.on_backend_status.append(relay)
+
     @property
     def client(self):
         return self.ctl.backend
-
-    def load_grants(self, on_status: Callable[[str], None] | None = None) -> None:
-        """Build the USER permission index from read-only backend GETs (see hss/core/sd_policy.py)."""
-        from ..core.sd_policy import GrantIndex
-        c = self.ctl.backend
-        if not c or not c.is_authenticated:
-            return
-        say = on_status or (lambda _m: None)
-        say("Loading file permissions from the backend ...")
-
-        def ok(idx):
-            self.ctl.grants = idx
-            warn = f" WARNING: {len(idx.warnings)} backend name(s) are not 8.3-safe and cannot match SD files." if idx.warnings else ""
-            say(f"Permissions loaded for {len(idx)} file(s).{warn}")
-            self.backend_changed.emit()
-
-        def err(e):
-            self.ctl.grants = None
-            say(f"Could not load permissions: {type(e).__name__}: {e}")
-            self.backend_changed.emit()
-
-        def build():
-            idx = GrantIndex.build(c)
-            uid = (c.current_user or {}).get("id")
-            if uid:  # LOCAL read-only flags set by an admin (CLIENT-ENFORCED-ONLY)
-                idx.download_blocked = {x.upper() for x in self.ctl.download_flags.blocked_for(str(uid))}
-            return idx
-
-        self.runner.run(build, ok, err)
 
     @property
     def signed_in(self) -> bool:
@@ -258,68 +239,6 @@ def _show_error(parent, exc: Exception) -> None:
     QMessageBox.warning(parent, "Hybrid Secure Storage", friendly(exc))
 
 
-def _users_tab(ctx: Ctx) -> QWidget:
-    """Admin > Users. Backend users through ctl.admin (role-checked service). 'Remove' = disable: no DELETE route."""
-    svc = ctx.ctl.admin
-
-    def create(tab, _row):
-        v = ask_fields(tab, "Create user",
-                       [("u", f"Username (max {MAX_USERNAME})", "text"), ("p", f"Password (min {MIN_PASSWORD})", "password"),
-                        ("r", "Role (the backend allows only one ADMIN)", "choice", ["USER", "ADMIN"])])
-        if not v:
-            return
-        try:
-            validate_username(v["u"])
-            validate_password(v["p"], v["u"])
-            validate_role(v["r"])
-        except ServiceError as exc:
-            _show_error(tab, exc)
-            return
-        tab.do(lambda: svc.create_user(v["u"], v["p"], v["r"]), f"User {v['u']} created.")
-
-    def edit(tab, row):
-        if not row:
-            return
-        v = ask_fields(tab, f"Edit {row.get('username')}",
-                       [("r", "Role", "choice", ["USER", "ADMIN"]), ("a", "Status", "choice", ["Active", "Disabled"])])
-        if not v:
-            return
-
-        def go():
-            label = str(row.get("username"))
-            if v["r"] != str(row.get("role")).upper():
-                svc.set_user_role(str(row["id"]), v["r"], label)
-            if (v["a"] == "Active") != bool(row.get("is_active", True)):
-                svc.set_user_active(str(row["id"]), v["a"] == "Active", label)
-
-        tab.do(go, "User updated.")
-
-    def disable(tab, row):
-        if row and QMessageBox.question(tab, "Disable user",
-                                        f"Disable {row.get('username')}? (The backend has no delete: users are disabled.)") == QMessageBox.Yes:
-            tab.do(lambda: svc.set_user_active(str(row["id"]), False, str(row.get("username"))), "User disabled.")
-
-    def enable(tab, row):
-        if row:
-            tab.do(lambda: svc.set_user_active(str(row["id"]), True, str(row.get("username"))), "User enabled.")
-
-    w = QWidget()
-    lay = QVBoxLayout(w)
-    if ctx.ctl.config.test_mode:  # PIN test mode only; never shown in production
-        box = QLabel("LOCAL TEST identities (read-only, from test_identities.json; PIN slots, not backend users):\n" +
-                     "\n".join(f"  slot {s}: {n} ({r})" for s, n, r in svc.local_test_identities()))
-        box.setStyleSheet(theme.banner_style("warning"))
-        lay.addWidget(box)
-    lay.addWidget(QLabel("Backend users (changes are written to the backend immediately):"))
-    tab = ListTab(ctx, lambda p, f: svc.list_users(p),
-                  [Action("Create user...", create, needs_row=False), Action("Edit...", edit),
-                   Action("Disable (no delete)", disable), Action("Enable", enable)])
-    tab.table.setToolTip("Users cannot be deleted: the deployed backend has no DELETE route.")
-    lay.addWidget(tab, 1)
-    w.list_tab = tab  # type: ignore[attr-defined]
-    return w
-
-
 class DevicesTab(QWidget):
     """Admin > Devices: backend registry + LOCAL USB history (never deleted), each row labelled with its source."""
     HEADERS = ("Device ID", "Name", "Associated user", "Type", "IP", "First seen (IST)", "Last seen (IST)", "Status", "Source")
@@ -459,17 +378,20 @@ def _policies_tab(ctx: Ctx) -> ListTab:
 
 
 def build_dashboard(ctx: Ctx, role: str, sd_page_factory: Callable[[Ctx], QWidget] | None = None) -> QTabWidget:
-    """role is 'admin' or 'user' and comes from the identity file via the auth FSM only.
+    """role is 'admin' or 'user' and comes from the enrollment record (or the test identity file) via the auth FSM only.
     Landing tab: Users (admin) / SD Card (user). A USER dashboard never contains admin tabs (and the admin
     service functions refuse non-admin callers independently)."""
+    from .backend_panel import BackendServicePanel
+    from .users_tab import UsersTab
     admin = role == "admin"
     tabs = QTabWidget()
     tabs.setObjectName("adminDashboard" if admin else "userDashboard")
     backend_tabs: list = []
-    if admin:
-        users = _users_tab(ctx)
-        tabs.addTab(users, "Users")
-        backend_tabs.append(users.list_tab)
+    panel = None
+    if admin and not ctx.ctl.config.test_mode:
+        tabs.addTab(UsersTab(ctx), "Users")
+    elif admin:   # PIN test mode: no enrollment; show the LOCAL TEST identities read-only
+        tabs.addTab(_test_users_tab(ctx), "Users")
     if sd_page_factory:
         tabs.addTab(sd_page_factory(ctx), "SD Card")
     if admin:
@@ -478,18 +400,29 @@ def build_dashboard(ctx: Ctx, role: str, sd_page_factory: Callable[[Ctx], QWidge
         pol = _policies_tab(ctx)
         tabs.addTab(pol, "Offline policies")
         backend_tabs.append(pol)
+        if not ctx.ctl.config.test_mode:
+            panel = BackendServicePanel(ctx)
+            tabs.addTab(panel, "Backend connection")
 
     def on_change() -> None:
+        if panel is not None:
+            panel.update_controls()
         for t in backend_tabs:
             t.clear()
-        if not ctx.signed_in:
-            ctx.auto_tried = False
-        elif not admin and ctx.ctl.grants is None and not ctx.auto_tried:
-            ctx.auto_tried = True  # one automatic attempt per sign-in (no retry loop on failure)
-            ctx.load_grants()
 
     ctx.backend_changed.connect(on_change)
     tabs.on_change = on_change  # type: ignore[attr-defined]
     for t in backend_tabs:
         t.reload() if ctx.signed_in else t.clear()
     return tabs
+
+
+def _test_users_tab(ctx: Ctx) -> QWidget:
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    box = QLabel("PIN-ONLY TEST MODE - LOCAL TEST identities (read-only, from test_identities.json; PIN slots, not enrolled users):\n" +
+                 "\n".join(f"  slot {s}: {n} ({r})" for s, n, r in ctx.ctl.admin.local_test_identities()))
+    box.setStyleSheet(theme.banner_style("warning"))
+    lay.addWidget(box)
+    lay.addStretch(1)
+    return w

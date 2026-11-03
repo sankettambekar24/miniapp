@@ -301,6 +301,7 @@ class SerialManager:
         self._thread: threading.Thread | None = None
         self.dropped_overlong = 0
         self._rescan = False
+        self._rawq: "queue.Queue[str]" = queue.Queue()   # fire-and-forget host lines (e.g. FACE_VERIFIED:<id>)
         self._probe_cache: dict[tuple, str] = {}   # (device, serial#) -> result text of the VERSION probe
         self._open_errors: dict[str, str] = {}
         self.diagnostics: list[dict] = []          # per-port rows for the Diagnostics panel (replaced atomically)
@@ -358,6 +359,28 @@ class SerialManager:
         self._cmdq.put(_Tx(rid, fn, timeout, callback, guard))
         return rid
 
+    def send_raw(self, line: str) -> None:
+        """Queue ONE line to be written on the worker thread, with no reply expected and no request bookkeeping.
+        Used for the host's answer to the device's face request (the firmware is reading Serial directly while it
+        waits). Dropped if the link is down."""
+        if "\n" in line or "\r" in line or not line:
+            raise ValueError("raw line must be a single non-empty line")
+        self._rawq.put(line)
+
+    def _flush_raw(self) -> None:
+        while True:
+            try:
+                line = self._rawq.get_nowait()
+            except queue.Empty:
+                return
+            if self._ser is None:
+                continue
+            try:
+                self._ser.write(line.encode("ascii") + b"\n")
+            except Exception as exc:
+                self._drop(f"write failed: {type(exc).__name__}")
+                return
+
     def rescan(self) -> None:
         """Forget probe results and scan again on the next worker tick (Rescan button)."""
         self._rescan = True
@@ -393,6 +416,7 @@ class SerialManager:
             self._open_errors.clear()
             self._next_scan = 0.0
         if self._ser is None:
+            self._flush_raw()   # drops queued raw lines: no link
             self._reject_queued("not connected")
             if now >= self._next_scan:
                 self._next_scan = now + self.config.scan_interval
@@ -409,6 +433,7 @@ class SerialManager:
             if self._port and self._port.device not in devices:
                 self._drop("port removed")
                 return
+        self._flush_raw()
         self._start_next_request(now)
         if self._ser is None:
             return

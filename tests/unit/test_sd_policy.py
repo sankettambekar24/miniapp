@@ -9,7 +9,7 @@ from hss.core.sd_policy import GrantIndex, SdPolicy, check_83_safe
 from sd_rig import SdRig
 
 FILES = {"a.txt": b"AAA", "b.txt": b"BBB", "secret.txt": b"SSS"}
-IDX = GrantIndex({"a.txt": frozenset({"LIST", "READ"}), "b.txt": frozenset({"LIST"})})
+IDX = GrantIndex({"a.txt": frozenset({"LIST", "READ", "DOWNLOAD"}), "b.txt": frozenset({"LIST"})})
 
 
 def rig(role, idx=IDX):

@@ -24,20 +24,22 @@ def test_test_mode_banner_and_title(app):
     assert "PIN-ONLY TEST MODE" in w.mode_label.text()
 
 
-def test_production_mode_ui_is_distinct_and_password_based(app):
+def test_production_mode_ui_is_distinct_three_factor_and_has_no_password_login(app):
     rig = Rig([ST], mode=MODE_PRODUCTION)
     w = MainWindow(rig.ctl)
     assert w.banner.isHidden() and not w.mode_banner.isHidden()           # blue production banner, no red test banner
-    assert "PRODUCTION" in w.mode_banner.text()
-    assert w.mode_title.text() == "Password login (no hardware factor)"
-    assert not w.login_box.isHidden() and w.start_btn.isHidden() and w.factor_box.isHidden()
+    assert "PRODUCTION" in w.mode_banner.text() and "no liveness" in w.mode_banner.text()
+    assert w.mode_title.text() == "Three-factor login"
+    assert not w.steps_box.isHidden() and w.start_btn.isHidden() and w.factor_box.isHidden()
+    assert not hasattr(w, "login_box") and not hasattr(w, "pw_edit")      # no username/password login screen
+    texts = " ".join(l.text() for l in w.step_labels.values())
+    assert "Fingerprint" in texts and "Face" in texts and "PIN" in texts and "Laptop webcam (development/test camera)" in texts
     assert not w.signout_btn.isEnabled() and w.signout_btn.toolTip()
-    assert "[PIN TEST MODE]" not in w.windowTitle()
 
 
-def test_test_mode_ui_stays_red_and_has_no_password_form(app):
+def test_test_mode_ui_stays_red_and_has_no_three_step_panel(app):
     w = MainWindow(Rig([ST]).ctl)
-    assert not w.banner.isHidden() and w.mode_banner.isHidden() and w.login_box.isHidden()
+    assert not w.banner.isHidden() and w.mode_banner.isHidden() and w.steps_box.isHidden()
     assert "[PIN TEST MODE]" in w.windowTitle()
 
 

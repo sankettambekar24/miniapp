@@ -174,22 +174,21 @@ class SdPage(QWidget):
         self.btn_probe.setEnabled(self.ctl.manager.connected and not self.busy)
         self.btn_probe.setToolTip("" if self.btn_probe.isEnabled() else (why or ""))
         admin = pol.role == "admin"
-        can_perm = admin and self.ctx is not None and self.ctx.signed_in and path is not None and not self.busy
+        can_perm = admin and self.ctx is not None and path is not None and not self.busy
         self.btn_perms.setVisible(admin)
         self.btn_perms.setEnabled(can_perm)
         self.btn_perms.setToolTip("" if can_perm else
-                                  ("Select a file first." if path is None else "Requires a signed-in backend session."))
+                                  "Select a file first.")
         self.btn_cancel.setEnabled(self.busy)
         self.btn_cancel.setToolTip("" if self.busy else "Nothing to cancel.")
         if user:
             have = self.ctl.grants is not None
             self.perm_label.setText(
-                "Your permissions load automatically from the backend after the backend sign-in. " +
-                (f"Loaded for {len(self.ctl.grants)} file(s). Read = preview; Download needs Read plus admin approval."
-                 if have else "Not loaded yet: nothing can be listed, previewed or downloaded."))
+                "You only see files an administrator assigned to you. Read = list + preview, Download = save a copy. " +
+                (f"Assigned: {len(self.ctl.grants)} file(s)." if have else "Permissions are not available."))
         else:
             self.perm_label.setText("Admin: list / preview / download / upload everything. Permissions... assigns per-user "
-                                    "Read (backend grants) and Download (LOCAL flag).")
+                                    "Read and Download (LOCAL permissions, client-enforced only).")
         if why and not self.busy:
             self.files.setRowCount(0)
             self.paths = []

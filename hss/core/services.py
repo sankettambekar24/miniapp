@@ -45,12 +45,11 @@ class ValidationError(ServiceError):
 
 @dataclass(frozen=True)
 class AccessChange:
-    """Desired access of one backend user to one file. read -> LIST+READ backend grants (both are needed: LIST to
-    see the file, READ for detail/content). download_blocked is a LOCAL flag (backend has no download grant)."""
+    """Desired LOCAL access of one user to one SD file (Read = list + preview, Download = save a copy)."""
     user_id: str
     username: str
     read: bool
-    download_blocked: bool = False
+    download: bool = False
 
 
 def validate_username(u: str) -> str:
@@ -182,100 +181,56 @@ class AdminService:
         self._admin("AUDIT_VERIFY", "audit")
         return self.ctl.audit.verify()
 
-    # ---- per-file access (SD card page) ----
-    def file_access_snapshot(self, display_name: str) -> dict:
-        """Blocking (network). {file, users:[{id,username,role,read,download_blocked}]} for the permissions dialog."""
+    # ---- per-file access (SD card page): LOCAL permissions, CLIENT-ENFORCED-ONLY ----
+    def permission_snapshot(self, display_name: str) -> list[dict]:
+        """Users that can be given access (role USER) with their current Read/Download for this file."""
         self._admin("PERMISSIONS_VIEW", display_name)
-        c = self._client()
-        file, page = None, None
-        for _ in range(20):
-            pg = c.list_files(page)
-            for rec in pg.results:
-                if isinstance(rec, dict) and str(rec.get("display_name", "")).upper() == display_name.upper():
-                    file = rec
-            if file or not pg.next:
-                break
-            page = (page or 1) + 1
-        users, page = [], None
-        for _ in range(20):
-            pg = c.list_users(page)
-            users += [u for u in pg.results if isinstance(u, dict)]
-            if not pg.next:
-                break
-            page = (page or 1) + 1
-        grants = c.list_grants(str(file["id"])) if file else []
-        active = {}
-        for g in grants:
-            if isinstance(g, dict) and g.get("active", g.get("revoked_at") is None):
-                active.setdefault(str(g.get("subject_user_id")), set()).add(str(g.get("permission")))
-        blocked = self.ctl.download_flags.blocked_subjects(display_name)
-        return {"file": file, "users": [
-            {"id": str(u.get("id")), "username": str(u.get("username")), "role": str(u.get("role")),
-             "read": "READ" in active.get(str(u.get("id")), ()) and "LIST" in active.get(str(u.get("id")), ()),
-             "download_blocked": str(u.get("id")) in blocked, "grants": [g for g in grants if isinstance(g, dict)
-                                                                          and str(g.get("subject_user_id")) == str(u.get("id"))]}
-            for u in users]}
+        have = self.ctl.permissions.for_file(display_name)
+        return [{"id": sid, "username": name, "role": "user", "read": have.get(sid, (False, False))[0],
+                 "download": have.get(sid, (False, False))[1]} for sid, name in self.ctl.subjects()]
 
-    def create_file_metadata(self, display_name: str) -> dict:
-        """Create the backend record that the SD file maps to (display_name == SD path); owner = the signed-in admin."""
-        self._admin("FILE_METADATA_CREATE", display_name)
-        c = self._client()
-        owner = (c.current_user or {}).get("id")
-        if not owner:
-            raise NotSignedIn("Backend user id unknown; sign in again.")
-        return self._run("FILE_METADATA_CREATE", display_name, lambda: c.create_file_metadata(str(owner), display_name))
-
-    def apply_file_access(self, file_id: str, display_name: str, snapshot_users: list[dict],
-                          changes: list[AccessChange]) -> list[str]:
-        """Blocking. Applies only DIFFERENCES vs the snapshot. Returns human-readable log lines."""
+    def apply_permissions(self, display_name: str, changes: list["AccessChange"]) -> list[str]:
         self._admin("PERMISSION_CHANGE", display_name)
-        c = self._client()
-        by_id = {u["id"]: u for u in snapshot_users}
         done: list[str] = []
+        valid = {sid for sid, _n in self.ctl.subjects()}
         for ch in changes:
-            cur = by_id.get(ch.user_id, {"read": False, "download_blocked": False, "grants": []})
-            res = f"{display_name} -> {ch.username}"
-            if ch.read and not cur["read"]:
-                have = {g.get("permission") for g in cur["grants"] if g.get("active", g.get("revoked_at") is None)}
-                for perm in ("LIST", "READ"):
-                    if perm not in have:
-                        self._run("PERMISSION_GRANT", res, lambda p=perm: c.create_grant(file_id, ch.user_id, p), perm)
-                done.append(f"granted Read (LIST+READ) to {ch.username}")
-            elif not ch.read and cur["read"]:
-                for g in cur["grants"]:
-                    if g.get("active", g.get("revoked_at") is None) and g.get("permission") in ("LIST", "READ"):
-                        self._run("PERMISSION_REVOKE", res, lambda gid=str(g["id"]): c.revoke_grant(file_id, gid),
-                                  str(g.get("permission")))
-                done.append(f"revoked Read from {ch.username}")
-            want_block = ch.download_blocked if ch.read else False
-            if want_block != cur["download_blocked"] or (not ch.read and cur["download_blocked"]):
-                self.ctl.download_flags.set_blocked(ch.user_id, display_name, want_block)
-                self.ctl.audit_event("PERMISSION_DOWNLOAD_FLAG", resource=res, status=SUCCESS,
-                                     details=f"download {'blocked' if want_block else 'allowed'} (LOCAL flag)")
-                done.append(f"download {'blocked' if want_block else 'allowed'} for {ch.username} (LOCAL)")
+            if ch.user_id not in valid:
+                raise ValidationError("user", f"{ch.username!r} is not an enrolled user")
+            read, dl = bool(ch.read), bool(ch.download and ch.read)   # Download needs Read in this UI
+            cur = self.ctl.permissions.for_file(display_name).get(ch.user_id, (False, False))
+            if (read, dl) == cur:
+                continue
+            self.ctl.permissions.set(ch.user_id, display_name, read, dl)
+            self.ctl.audit_event("PERMISSION_CHANGE", resource=f"{display_name} -> {ch.username}",
+                                 details=f"read={read}; download={dl} (LOCAL permission)")
+            done.append(f"{ch.username}: read={'yes' if read else 'no'}, download={'yes' if dl else 'no'}")
         return done
 
 
-class DownloadFlags:
-    """LOCAL download-blocked flags (CLIENT-ENFORCED-ONLY). Default: no row => download follows READ."""
+class FilePermissions:
+    """LOCAL per-user, per-file Read / Download (SQLite). Default = no row = NO access (fail closed). CLIENT-ENFORCED-ONLY:
+    the firmware has no per-file permissions and the backend file-content endpoint is BLOCKED (503)."""
 
     def __init__(self, db):
         self.db = db
 
-    def set_blocked(self, subject: str, file: str, blocked: bool) -> None:
-        from datetime import datetime, timezone
+    def set(self, user_id: str, file: str, read: bool, download: bool) -> None:
+        from . import clock
         with self.db.lock:
-            self.db.conn.execute(
-                "INSERT INTO download_flags (subject,file,download_blocked,updated_at) VALUES (?,?,?,?) "
-                "ON CONFLICT(subject,file) DO UPDATE SET download_blocked=excluded.download_blocked, updated_at=excluded.updated_at",
-                (subject, file.upper(), int(blocked), datetime.now(timezone.utc).isoformat()))
+            if not read and not download:
+                self.db.conn.execute("DELETE FROM file_permissions WHERE user_id=? AND file=?", (user_id, file.upper()))
+            else:
+                self.db.conn.execute(
+                    "INSERT INTO file_permissions (user_id,file,can_read,can_download,updated_at) VALUES (?,?,?,?,?) "
+                    "ON CONFLICT(user_id,file) DO UPDATE SET can_read=excluded.can_read, can_download=excluded.can_download, "
+                    "updated_at=excluded.updated_at", (user_id, file.upper(), int(read), int(download), clock.to_iso()))
 
-    def blocked_for(self, subject: str) -> set[str]:
+    def for_user(self, user_id: str) -> dict[str, tuple[bool, bool]]:
         with self.db.lock:
-            return {r[0] for r in self.db.conn.execute(
-                "SELECT file FROM download_flags WHERE subject=? AND download_blocked=1", (subject,))}
+            return {r[0]: (bool(r[1]), bool(r[2])) for r in self.db.conn.execute(
+                "SELECT file, can_read, can_download FROM file_permissions WHERE user_id=?", (user_id,))}
 
-    def blocked_subjects(self, file: str) -> set[str]:
+    def for_file(self, file: str) -> dict[str, tuple[bool, bool]]:
         with self.db.lock:
-            return {r[0] for r in self.db.conn.execute(
-                "SELECT subject FROM download_flags WHERE file=? AND download_blocked=1", (file.upper(),))}
+            return {r[0]: (bool(r[1]), bool(r[2])) for r in self.db.conn.execute(
+                "SELECT user_id, can_read, can_download FROM file_permissions WHERE file=?", (file.upper(),))}

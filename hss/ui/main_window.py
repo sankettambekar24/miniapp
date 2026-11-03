@@ -1,32 +1,38 @@
 """Main window: sidebar, mode banner, authentication page, role-routed dashboards, status bar.
 
 Two visibly different modes:
-  * PRODUCTION (default): backend username/password login, blue banner, NO PIN-only identities, no test identities.
+  * PRODUCTION (default): THREE-FACTOR login driven only by real device responses: fingerprint (device) -> face (laptop webcam,
+    host-side, no liveness) -> PIN (device keypad). Blue banner. There is no username/password login.
   * PIN-ONLY TEST MODE (explicit config flag only): red banner, device keypad PIN, local test identities.
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QPushButton, QStackedWidget, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QPushButton,
+                               QStackedWidget, QTabWidget, QVBoxLayout, QWidget)
 
-from ..backend.messages import friendly
 from ..controller import AppController
-from ..core.auth_fsm import PASSWORD_LOGIN_LABEL, AuthState
+from ..core.auth_fsm import AuthState
+from ..core.face import CAMERA_LABEL
 from ..factors.base import FACE, FINGERPRINT
 from . import theme
-from .async_util import Runner
 from .dashboards import Ctx, build_dashboard
 from .diagnostics import DiagnosticsPage
 from .qt_bridge import QtBridge
 from .sd_page import make_sd_page
 
 BANNER_TEXT = "PIN-ONLY TEST MODE - not production authentication"
-PRODUCTION_BANNER = "PRODUCTION - backend password login (no hardware factor)"
+PRODUCTION_BANNER = ("PRODUCTION - fingerprint + face + PIN login. The face check runs on this PC "
+                     f"({CAMERA_LABEL}) and has no liveness protection.")
 PAGE_AUTH, PAGE_ADMIN, PAGE_USER, PAGE_DIAG = range(4)
 
-_STATUS_TEXT = {"checking": "checking ...", "waking": "waking up ...", "online": "online", "offline": "OFFLINE"}
-_STATUS_COLOR = {"checking": theme.WARN_TEXT, "waking": theme.WARN_TEXT, "online": theme.OK_TEXT, "offline": theme.ERROR_TEXT}
+STEP_TITLES = {"fingerprint": "1. Fingerprint (device sensor)", "face": f"2. Face ({CAMERA_LABEL})",
+               "pin": "3. PIN (device keypad)"}
+STEP_TEXT = {"pending": ("waiting", theme.MUTED), "active": ("in progress ...", theme.WARN_TEXT), "ok": ("passed", theme.OK_TEXT)}
+_STATUS_TEXT = {"checking": "checking ...", "waking": "waking up ...", "online": "online", "offline": "OFFLINE",
+                "connected": "service connected", "not connected": "not connected"}
+_STATUS_COLOR = {"checking": theme.WARN_TEXT, "waking": theme.WARN_TEXT, "online": theme.OK_TEXT,
+                 "offline": theme.ERROR_TEXT, "connected": theme.OK_TEXT, "not connected": theme.MUTED}
 
 
 class MainWindow(QMainWindow):
@@ -34,10 +40,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.ctl = controller
         self.bridge = QtBridge(controller)
-        self.runner = Runner()
         self.setWindowTitle("Hybrid Secure Storage" + ("  [PIN TEST MODE]" if controller.config.test_mode else ""))
-        self.resize(1020, 660)
+        self.resize(1020, 680)
         test = controller.config.test_mode
+        self.setup_ctx: Ctx | None = None
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -54,6 +60,7 @@ class MainWindow(QMainWindow):
         self.mode_banner = QLabel(PRODUCTION_BANNER)  # PRODUCTION only (blue)
         self.mode_banner.setObjectName("productionBanner")
         self.mode_banner.setAlignment(Qt.AlignCenter)
+        self.mode_banner.setWordWrap(True)
         self.mode_banner.setStyleSheet(theme.banner_style("info"))
         self.mode_banner.setVisible(not test)
         outer.addWidget(self.mode_banner)
@@ -89,6 +96,7 @@ class MainWindow(QMainWindow):
         self.bridge.usb_changed.connect(self.usb_label.setText)
         self.bridge.usb_changed.connect(self.usb_detail.setText)
         self.bridge.backend_status.connect(self._on_backend_status)
+        self.bridge.face_status.connect(self.camera_label.setText)
         self._on_backend_status(controller.backend_status, controller.backend_detail)
         self.refresh()
         self.sidebar.setCurrentRow(PAGE_AUTH)
@@ -108,37 +116,43 @@ class MainWindow(QMainWindow):
         self.usb_detail.setObjectName("usbDetail")
         self.usb_detail.setWordWrap(True)
         lay.addWidget(self.mode_title)
+
+        # --- production: three-step status, driven only by real device responses ---
+        self.steps_box = QFrame()
+        self.steps_box.setFrameShape(QFrame.StyledPanel)
+        sl = QVBoxLayout(self.steps_box)
+        self.step_labels: dict[str, QLabel] = {}
+        for key, title in STEP_TITLES.items():
+            lbl = QLabel()
+            lbl.setObjectName(f"step_{key}")
+            lbl.setStyleSheet("font-size:15px;")
+            self.step_labels[key] = lbl
+            sl.addWidget(lbl)
+        self.steps_box.setVisible(not test)
+        lay.addWidget(self.steps_box)
+        self.hint_label = QLabel("Place your finger on the sensor to start. First-time setup (the device has no users yet): "
+                                 "type the bootstrap PIN on the device keypad.")
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setStyleSheet(theme.muted_style())
+        self.hint_label.setVisible(not test)
+        lay.addWidget(self.hint_label)
         lay.addWidget(self.state_label)
-
-        # --- production: password login form ---
-        self.login_box = QFrame()
-        self.login_box.setFrameShape(QFrame.StyledPanel)
-        form = QFormLayout(self.login_box)
-        self.user_edit = QLineEdit()
-        self.user_edit.setPlaceholderText("backend username")
-        self.pw_edit = QLineEdit()
-        self.pw_edit.setEchoMode(QLineEdit.Password)
-        self.pw_edit.setPlaceholderText("password (sent only to the backend over HTTPS; never stored)")
-        self.login_btn = QPushButton("Sign in")
-        self.login_btn.clicked.connect(self._on_login)
-        self.pw_edit.returnPressed.connect(self._on_login)
-        self.user_edit.returnPressed.connect(self._on_login)
-        self.login_msg = QLabel("")
-        self.login_msg.setObjectName("loginMessage")
-        self.login_msg.setWordWrap(True)
-        form.addRow("Username", self.user_edit)
-        form.addRow("Password", self.pw_edit)
-        form.addRow(self.login_btn)
-        form.addRow(self.login_msg)
-        self.login_box.setVisible(not test)
-        lay.addWidget(self.login_box)
-
+        self.camera_label = QLabel(self.ctl.face_status)
+        self.camera_label.setObjectName("cameraStatus")
+        self.camera_label.setStyleSheet(theme.muted_style())
+        self.camera_label.setVisible(not test)
+        lay.addWidget(self.camera_label)
         lay.addWidget(self.usb_detail)
+        self.setup_btn = QPushButton("Start first-time setup ...")
+        self.setup_btn.clicked.connect(self._on_setup)
+        self.setup_btn.setVisible(False)
+        lay.addWidget(self.setup_btn)
+
         self.start_btn = QPushButton("Start authentication")
         self.start_btn.clicked.connect(self._on_start)
         self.start_btn.setVisible(test)
         self.signout_btn = QPushButton("Sign out")
-        self.signout_btn.clicked.connect(self._on_sign_out)
+        self.signout_btn.clicked.connect(self.ctl.sign_out)
         lay.addWidget(self.start_btn)
         lay.addWidget(self.signout_btn)
         self.factor_box = QFrame()
@@ -179,41 +193,20 @@ class MainWindow(QMainWindow):
         if not res.ok:
             self.state_label.setText(res.message)
 
-    def _on_sign_out(self) -> None:
-        self.ctl.sign_out()
-        self.login_msg.setText("Signed out.")
-
-    def _on_login(self) -> None:
-        if self.ctl.config.test_mode or not self.login_btn.isEnabled():
-            return
-        user, pw = self.user_edit.text().strip(), self.pw_edit.text()
-        self.pw_edit.clear()                       # the password never stays in the widget
-        if not user or not pw:
-            self.login_msg.setText("Enter both username and password.")
-            return
-        self.login_btn.setEnabled(False)
-        self.login_msg.setText("Signing in ... (a sleeping free-tier backend can take up to a minute)")
-        self.ctl.on_backend_wait = lambda a, s, r: None
-        self.runner.run(lambda: self.ctl.backend_login(user, pw), self._login_ok, self._login_failed)
-
-    def _login_ok(self, ident) -> None:
-        self.login_btn.setEnabled(True)
-        self.login_msg.setText("")
-        self.refresh()
-
-    def _login_failed(self, exc: Exception) -> None:
-        self.login_btn.setEnabled(True)
-        self.login_msg.setText(f"Sign-in failed: {friendly(exc)}")   # fail closed: nothing was granted
-        self.refresh()
+    def _on_setup(self) -> None:
+        from .enroll_wizard import EnrollWizard
+        if self.setup_ctx is None:
+            self.setup_ctx = Ctx(self.ctl)
+        EnrollWizard(self.setup_ctx, None, bootstrap=True, parent=self).exec()
 
     def _on_backend_status(self, status: str, detail: str) -> None:
         if self.ctl.config.test_mode:
             self.backend_label.setText("Backend: not used (PIN test mode)")
             return
-        self.backend_label.setText(f"<span style='color:{_STATUS_COLOR.get(status, theme.TEXT)}'>&#9679;</span> "
-                                   f"Backend: {_STATUS_TEXT.get(status, status)}")
         self.backend_label.setTextFormat(Qt.RichText)
-        self.backend_label.setToolTip(detail or "mini-backend-z8dr.onrender.com")
+        self.backend_label.setText(f"<span style='color:{_STATUS_COLOR.get(status, theme.TEXT)}'>&#9679;</span> "
+                                   f"Backend (service): {_STATUS_TEXT.get(status, status)}")
+        self.backend_label.setToolTip(detail or "The backend is optional: it cannot verify hardware factors and is not used for login.")
 
     def _sync_dashboard(self) -> None:
         """Build the role dashboard for an active session; destroy it (and any backend state) on any lock."""
@@ -235,11 +228,20 @@ class MainWindow(QMainWindow):
 
     dash_role: str | None = None
 
+    def _paint_steps(self) -> None:
+        steps = self.ctl.fsm.steps
+        for key, lbl in self.step_labels.items():
+            text, color = STEP_TEXT.get(steps.get(key, "pending"), STEP_TEXT["pending"])
+            mark = {"waiting": "○", "in progress ...": "◐", "passed": "●"}[text]
+            lbl.setText(f"<span style='color:{color}'>{mark}</span> {STEP_TITLES[key]} &mdash; "
+                        f"<span style='color:{color}'>{text}</span>")
+            lbl.setTextFormat(Qt.RichText)
+
     def refresh(self) -> None:
         fsm, cfg = self.ctl.fsm, self.ctl.config
         test = cfg.test_mode
-        self.mode_label.setText("Auth: PIN-ONLY TEST MODE" if test else f"Auth: {PASSWORD_LOGIN_LABEL}")
-        self.mode_title.setText("PIN-ONLY TEST MODE" if test else PASSWORD_LOGIN_LABEL)
+        self.mode_label.setText("Auth: PIN-ONLY TEST MODE" if test else "Auth: fingerprint + face + PIN")
+        self.mode_title.setText("PIN-ONLY TEST MODE" if test else "Three-factor login")
         color = theme.ERROR_TEXT if test else theme.TEXT
         self.mode_title.setStyleSheet(f"font-size:22px;font-weight:bold;color:{color};")
         self.state_label.setText(f"{fsm.state.value}: {fsm.message}")
@@ -250,12 +252,10 @@ class MainWindow(QMainWindow):
                                   "Connect the device first (see Diagnostics), or authentication is already in progress/locked")
         self.signout_btn.setEnabled(signed)
         self.signout_btn.setToolTip("" if signed else "No active session to sign out of.")
-        self.login_box.setVisible(not test and not signed)
+        self.setup_btn.setVisible(not test and fsm.state is AuthState.BOOTSTRAP)
         if not test:
-            dev = ("device PIN unlock ACTIVE" if fsm.device_pin_verified else
-                   "device PIN unlock not active (type your PIN on the keypad to use the SD card)")
-            self.usb_detail.setToolTip(dev)
-            self.state_label.setText(self.state_label.text() + (f"\nSD card access: {dev}." if signed else ""))
+            self._paint_steps()
+            self.hint_label.setVisible(fsm.state in (AuthState.IDLE, AuthState.FAILED, AuthState.LOCKED_ON_DISCONNECT))
         ident = self.ctl.session.identity
         for row in (PAGE_ADMIN, PAGE_USER):
             item = self.sidebar.item(row)

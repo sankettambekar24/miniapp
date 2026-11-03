@@ -135,10 +135,10 @@ def test_production_mode_fail_closed():
     rig = Rig([ST], mode=MODE_PRODUCTION)
     rig.connect()
     r = rig.ctl.begin_auth()
-    assert not r.ok and "password" in r.message.lower()
+    assert not r.ok and "finger" in r.message.lower()
     rig.device_says("AUTH_PIN_VERIFIED:1")
     assert rig.ctl.fsm.state is AuthState.IDLE          # a keypad PIN NEVER creates an identity in production
-    assert not rig.ctl.session.active and rig.ctl.fsm.device_pin_verified
+    assert not rig.ctl.session.active
 
 
 # ---- stale message rejection ----

@@ -1,45 +1,50 @@
-"""PIN-only authentication state machine.
+"""Authentication state machine. Two device builds, one FSM:
 
-IDLE -> WAITING_PIN -> VERIFIED / FAILED / LOCKED -> SESSION_ACTIVE -> LOCKED_ON_DISCONNECT
-
-* The PIN is typed on the DEVICE keypad; the desktop never sees it. The firmware reports only
-  "PIN verified, slot N". Role comes only from the local identity file (IdentityResolver).
-* Fail-closed: production mode never leaves IDLE; a verified PIN whose slot is unreported (legacy
-  firmware) or unmapped is FAILED, never a session.
-* Disconnect = immediate lock: session and token state are wiped and re-auth is required on reconnect.
-* Messages are accepted only from the current connection generation AND only in the state that expects
-  them; everything else is counted as stale and ignored.
-* Device lockout (3 failures) clears only on device reset (.ino L935-949); the desktop mirrors it as LOCKED.
+PRODUCTION (default) = THREE-FACTOR: fingerprint (device) -> face (this PC) -> PIN (device keypad), docs/THREE_FACTOR_DESIGN.md
+    IDLE -> IN_PROGRESS -> SESSION_ACTIVE | FAILED | LOCKED       (+ BOOTSTRAP for first-time setup)
+  * Every step shown is driven ONLY by lines the device really sent (FACE_SCAN:<id>, AUTH_STAGE:PIN, AUTH_OK:<id>).
+  * `AUTH_OK:<id>` is accepted only if THIS app verified that user's face for the same id moments before (a forged or
+    foreign AUTH_OK without our face verdict is rejected, fail-closed) and the id maps to an ENROLLED user.
+  * Role comes ONLY from that user's enrollment record. Failures are generic ("Authentication failed"); the stage code
+    from AUTH_FAILED:<stage> is kept in `last_failure_stage` for the AUDIT LOG only.
+PIN-ONLY TEST MODE (explicit config flag, red banner): the device build with 2 PIN slots; role from the local identity file.
+Both: disconnect = immediate lock; lines from an old connection generation are stale; device lockout (3 failures)
+clears only on device reset.
 """
 from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 
 from ..config import AppConfig
-from .identity import IdentityResolver
 from .protocol import LOCKOUT_ATTEMPTS, DeviceEvent, EventKind, parse_line
 from .serial_manager import LineEvent
 from .session import SessionStore
 
 log = logging.getLogger("hss.auth")
 
-PRODUCTION_MESSAGE = "Sign in with your backend username and password"
-PASSWORD_LOGIN_LABEL = "Password login (no hardware factor)"
+GENERIC_FAILURE = "Authentication failed."
+FACE_VERDICT_TTL = 120.0   # seconds an AUTH_OK may follow our face verdict
 
 
 class AuthState(Enum):
     IDLE = "IDLE"
+    IN_PROGRESS = "IN_PROGRESS"
+    BOOTSTRAP = "BOOTSTRAP"
     WAITING_PIN = "WAITING_PIN"
     VERIFIED = "VERIFIED"
     FAILED = "FAILED"
     LOCKED = "LOCKED"
     SESSION_ACTIVE = "SESSION_ACTIVE"
     LOCKED_ON_DISCONNECT = "LOCKED_ON_DISCONNECT"
+
+
+STEPS = ("fingerprint", "face", "pin")
 
 
 @dataclass(frozen=True)
@@ -49,17 +54,23 @@ class StartResult:
 
 
 class AuthFSM:
-    def __init__(self, config: AppConfig, resolver: IdentityResolver, session: SessionStore):
-        self._cfg, self._resolver, self.session = config, resolver, session
+    def __init__(self, config: AppConfig, resolver, session: SessionStore, clock: Callable[[], float] = time.monotonic):
+        self._cfg, self._resolver, self.session, self._clock = config, resolver, session, clock
         self._lock = threading.RLock()
         self.state = AuthState.IDLE
-        self.message = PRODUCTION_MESSAGE if not config.test_mode else "Device not connected"
+        self.message = "Device not connected"
         self.attempts = 0
-        self.device_pin_verified = False  # production only: keypad PIN verified on the device (gates SD access, never identity)
         self.stale_rejected = 0
         self.auth_session_id: str | None = None
+        self.steps: dict[str, str] = {s: "pending" for s in STEPS}   # pending | active | ok
+        self.last_failure_stage: str | None = None                  # AUDIT ONLY, never shown
+        self.last_failure_reason: str | None = None                 # AUDIT ONLY
+        self._pending_id: int | None = None
+        self._face_verified: tuple[int, float] | None = None
         self._conn_gen: int | None = None
         self.listeners: list[Callable[["AuthFSM"], None]] = []
+        self.face_listeners: list[Callable[[int], None]] = []        # called with the fingerprint id to verify
+        self.force_end_listeners: list[Callable[[str], None]] = []   # ask the controller to END_SESSION on the device
 
     # ---- helpers ----
     @property
@@ -67,61 +78,60 @@ class AuthFSM:
         return self._conn_gen is not None
 
     @property
-    def sd_ready(self) -> bool:
-        """SD commands may be sent whenever a session is active. We deliberately do NOT guess whether the device keypad
-        is unlocked: the firmware answers SD_ERROR:AUTH_REQUIRED itself and the UI shows that real error."""
-        return self.state is AuthState.SESSION_ACTIVE
-
-    def _notify(self) -> None:
-        for cb in list(self.listeners):
-            cb(self)
-
-    @property
     def identity(self):
         return self.session.identity
 
+    @property
+    def sd_ready(self) -> bool:
+        """SD commands may be sent whenever a session is active; the device answers SD_ERROR:AUTH_REQUIRED itself and the
+        UI shows that real error (no guessing about keypad state)."""
+        return self.state is AuthState.SESSION_ACTIVE
+
+    def _reset_steps(self) -> None:
+        self.steps = {s: "pending" for s in STEPS}
+        self._pending_id = None
+
     def _set(self, state: AuthState, message: str) -> None:
         self.state, self.message = state, message
-        log.info("auth -> %s (%s)", state.value, message)
+        log.info("auth -> %s", state.value)       # message may be user-specific: not logged
         for cb in list(self.listeners):
             cb(self)
 
     def _wipe(self) -> None:
         self.session.clear()
         self.auth_session_id = None
+        self._face_verified = None
+
+    def _idle_message(self) -> str:
+        return ("Device connected - enter your PIN on the device keypad" if self._cfg.test_mode
+                else "Place your finger on the sensor")
 
     # ---- connection events (called from the serial worker thread) ----
     def on_connected(self, conn_gen: int) -> None:
         with self._lock:
             self._conn_gen = conn_gen
             if self.state is AuthState.LOCKED_ON_DISCONNECT:
-                self.message = "Reconnected - re-authentication required"
+                self.message = "Reconnected - authenticate again"
                 for cb in list(self.listeners):
                     cb(self)
-            elif self._cfg.test_mode:
-                self._set(self.state, "Device connected - enter your PIN on the device keypad")
             else:
-                self.device_pin_verified = False
-                self._notify()
+                self._reset_steps()
+                self._set(self.state, self._idle_message())
 
     def on_disconnected(self, reason: str = "") -> None:
         with self._lock:
-            if not self._cfg.test_mode:
-                # Password login does not depend on the USB board: keep the session, drop only the device unlock.
-                self._conn_gen = None
-                self.device_pin_verified = False
-                self._notify()
-                return
             self._conn_gen = None
             self._wipe()
+            self._reset_steps()
             self.attempts = 0
             self._set(AuthState.LOCKED_ON_DISCONNECT, f"Device disconnected - locked ({reason})".rstrip(" ()"))
 
     # ---- user actions ----
     def start_auth(self) -> StartResult:
+        """PIN test mode only (optional click; the device accepts a PIN at any time)."""
         with self._lock:
             if not self._cfg.test_mode:
-                return StartResult(False, "Use the username/password form (no PIN start in production).")
+                return StartResult(False, "Authentication starts on the device: place your finger on the sensor.")
             if not self.connected:
                 return StartResult(False, "Device not connected")
             if self.state is AuthState.LOCKED:
@@ -135,20 +145,16 @@ class AuthFSM:
             self._set(AuthState.WAITING_PIN, "Enter your PIN on the device keypad")
             return StartResult(True, self.message)
 
-    def backend_sign_in(self, ident) -> None:
-        """Production only: the backend verified username+password and returned `ident` (role from the backend identity
-        route). There is NO hardware factor behind this session. Never used in PIN test mode."""
-        with self._lock:
-            if self._cfg.test_mode:
-                raise RuntimeError("password login is disabled in PIN test mode")
-            self.session.start(ident)
-            self._set(AuthState.SESSION_ACTIVE, f"Signed in as {ident.name} ({ident.role}) - {PASSWORD_LOGIN_LABEL}")
-
     def end_session(self, reason: str = "Session ended") -> None:
         with self._lock:
             self._wipe()
-            self.device_pin_verified = False
-            self._set(AuthState.IDLE if (self.connected or not self._cfg.test_mode) else AuthState.LOCKED_ON_DISCONNECT, reason)
+            self._reset_steps()
+            self._set(AuthState.IDLE if self.connected else AuthState.LOCKED_ON_DISCONNECT, reason)
+
+    def note_face_result(self, fp_id: int, matched: bool) -> None:
+        """The controller reports the verdict it just sent to the device for `fp_id` (the only source of FACE_VERIFIED)."""
+        with self._lock:
+            self._face_verified = (fp_id, self._clock()) if matched else None
 
     # ---- device lines (called from the serial worker thread) ----
     def handle_line(self, ev: LineEvent) -> None:
@@ -156,22 +162,83 @@ class AuthFSM:
             if ev.conn_gen != self._conn_gen:
                 self.stale_rejected += 1
                 return
-            if not self._cfg.test_mode:
-                # Production: hardware lines never create an identity or a role; they only track whether the device
-                # keypad PIN unlock is active (needed because the firmware refuses SD commands without it).
-                e = parse_line(ev.text)
-                if e.kind is EventKind.PIN_VERIFIED and e.slot is not None:
-                    self.device_pin_verified = True
-                    self._notify()
-                elif e.kind in (EventKind.SESSION_ENDED, EventKind.SESSION_EXPIRED, EventKind.LOCKED) and self.device_pin_verified:
-                    self.device_pin_verified = False
-                    self._notify()
-                return
-            self._handle_event(parse_line(ev.text))
+            e = parse_line(ev.text)
+            if self._cfg.test_mode:
+                self._handle_event(e)
+            else:
+                self._handle_three_factor(e)
 
     def _stale(self) -> None:
         self.stale_rejected += 1
 
+    def _fail(self, stage: str | None, reason: str) -> None:
+        """Generic user-facing failure; stage/reason only for the audit listener."""
+        self._wipe()
+        self.last_failure_stage, self.last_failure_reason = stage, reason
+        self._reset_steps()
+        self.attempts += 1
+        self._set(AuthState.FAILED, GENERIC_FAILURE)
+
+    # ---- production: three-factor ----
+    def _handle_three_factor(self, e: DeviceEvent) -> None:
+        k, st = e.kind, self.state
+        if k is EventKind.LOCKED:
+            self._wipe()
+            self._reset_steps()
+            self._set(AuthState.LOCKED, "Device locked out after too many failures - reset/power-cycle the device")
+            return
+        if st is AuthState.LOCKED:
+            return
+        if k is EventKind.FACE_REQUEST and e.slot is not None and st is not AuthState.SESSION_ACTIVE:
+            self.steps = {"fingerprint": "ok", "face": "active", "pin": "pending"}
+            self._pending_id = e.slot
+            self._face_verified = None
+            self._set(AuthState.IN_PROGRESS, "Fingerprint accepted - look at the camera")
+            for cb in list(self.face_listeners):
+                cb(e.slot)
+        elif k is EventKind.AUTH_STAGE and st is AuthState.IN_PROGRESS and self._pending_id is not None:
+            if self._face_verified is None or self._face_verified[0] != self._pending_id:
+                self._stale()   # the device claims a face pass we never sent: do not advance the UI
+                return
+            self.steps = {"fingerprint": "ok", "face": "ok", "pin": "active"}
+            self._set(AuthState.IN_PROGRESS, "Face accepted - enter your PIN on the device keypad")
+        elif k is EventKind.AUTH_OK and e.slot is not None and st is AuthState.IN_PROGRESS:
+            fv = self._face_verified
+            if fv is None or fv[0] != e.slot or self._pending_id != e.slot or self._clock() - fv[1] > FACE_VERDICT_TTL:
+                self._fail("HOST", "AUTH_OK without a matching host face verification (rejected)")
+                self._ask_device_to_end("AUTH_OK rejected")
+                return
+            ident = self._resolver.resolve(e.slot)
+            if ident is None:
+                self._fail("HOST", "AUTH_OK for an id that is not an ENROLLED user (rejected)")
+                self._ask_device_to_end("unknown/disabled id")
+                return
+            self.attempts = 0
+            self.last_failure_stage = self.last_failure_reason = None
+            self.auth_session_id = uuid.uuid4().hex
+            self.session.start(ident)
+            self.steps = {s: "ok" for s in STEPS}
+            self._pending_id = None
+            self._set(AuthState.SESSION_ACTIVE, f"Signed in as {ident.name} ({ident.role})")
+        elif k is EventKind.AUTH_FAILED:
+            if st is AuthState.SESSION_ACTIVE:
+                self._stale()
+                return
+            self._fail(e.detail or "?", f"device reported AUTH_FAILED:{e.detail}")
+        elif k is EventKind.BOOTSTRAP_OK and st is not AuthState.SESSION_ACTIVE:
+            self._reset_steps()
+            self._set(AuthState.BOOTSTRAP, "Setup mode: the device has no users yet. Enroll the first administrator.")
+        elif k in (EventKind.SESSION_ENDED, EventKind.SESSION_EXPIRED) and st in (AuthState.SESSION_ACTIVE, AuthState.BOOTSTRAP):
+            self._wipe()
+            self._reset_steps()
+            self._set(AuthState.IDLE, "Session ended by device" if k is EventKind.SESSION_ENDED else "Session expired")
+        # everything else (DBG, SD lines, enrollment replies handled by the enrollment service) is informational
+
+    def _ask_device_to_end(self, why: str) -> None:
+        for cb in list(self.force_end_listeners):
+            cb(why)
+
+    # ---- PIN-only test mode (unchanged behaviour) ----
     def _handle_event(self, e: DeviceEvent) -> None:
         k = e.kind
         if k is EventKind.LOCKED:  # safety signal: honoured in any connected state
@@ -204,4 +271,4 @@ class AuthFSM:
         elif k in (EventKind.OTHER, EventKind.FACTOR_PROMPT, EventKind.SD_ERROR, EventKind.ACCESS_GRANTED):
             pass  # informational; ACCESS_GRANTED alone never creates a session (no slot => no identity)
         else:
-            self._stale()  # e.g. PIN_VERIFIED while IDLE/FAILED/SESSION_ACTIVE
+            self._stale()  # e.g. PIN_VERIFIED while SESSION_ACTIVE

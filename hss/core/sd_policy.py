@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-LIST, READ = "LIST", "READ"
+LIST, READ, DOWNLOAD = "LIST", "READ", "DOWNLOAD"
 _SHORT_OK = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'()-@^_`{}~")
 MAX_FILES = 500
 
@@ -66,7 +66,7 @@ class GrantIndex:
         return self._ci.get(path.upper(), frozenset())
 
     def can_download(self, path: str) -> bool:
-        return READ in self.lookup(path) and path.upper() not in self.download_blocked
+        return DOWNLOAD in self.lookup(path) and path.upper() not in self.download_blocked
 
     def __len__(self) -> int:
         return len(self.perms)
@@ -155,8 +155,7 @@ class SdPolicy:
         idx = self._grants()
         if idx is None:
             return self.list_block_reason()
-        if not self.can(path, READ):
-            return "You do not hold a READ permission for this file."
         if not idx.can_download(path):
-            return "Read-only access: an admin has not allowed downloading this file."
+            return ("Preview only: you do not hold the DOWNLOAD permission for this file." if self.can(path, READ)
+                    else "You do not hold a permission for this file.")
         return None

@@ -91,9 +91,8 @@ ADMIN_CALLS = {
     "list_devices": lambda s: s.list_devices(),
     "list_audit": lambda s: s.list_audit(AuditFilter()),
     "verify_local_audit": lambda s: s.verify_local_audit(),
-    "file_access_snapshot": lambda s: s.file_access_snapshot("A.TXT"),
-    "create_file_metadata": lambda s: s.create_file_metadata("A.TXT"),
-    "apply_file_access": lambda s: s.apply_file_access("f1", "A.TXT", [], [AccessChange("u1", "alice", True)]),
+    "permission_snapshot": lambda s: s.permission_snapshot("A.TXT"),
+    "apply_permissions": lambda s: s.apply_permissions("A.TXT", []),
 }
 
 
@@ -137,23 +136,37 @@ def test_validation_typed_errors_and_password_never_audited():
     assert validate_password("123456789x", "someone")
 
 
-def test_apply_file_access_grants_list_and_read_and_local_download_flag():
+def test_local_permissions_roundtrip_default_deny_and_audit():
     ctl = login(Rig([ST]), 1)
-    users = [{"id": "u1", "username": "alice", "role": "USER", "read": False, "download_blocked": False, "grants": []}]
-    done = ctl.admin.apply_file_access("f1", "A.TXT", users, [AccessChange("u1", "alice", True, True)])
-    assert [c[1][2] for c in ctl.backend.calls if c[0] == "create_grant"] == ["LIST", "READ"]
-    assert ctl.download_flags.blocked_for("u1") == {"A.TXT"} and done
-    users = [{"id": "u1", "username": "alice", "role": "USER", "read": True, "download_blocked": True,
-              "grants": [{"id": "g1", "permission": "LIST", "active": True}, {"id": "g2", "permission": "READ", "active": True}]}]
-    ctl.admin.apply_file_access("f1", "A.TXT", users, [AccessChange("u1", "alice", False)])
-    assert [c[1][1] for c in ctl.backend.calls if c[0] == "revoke_grant"] == ["g1", "g2"]
-    assert ctl.download_flags.blocked_for("u1") == set()
+    assert ctl.admin.permission_snapshot("A.TXT") == [{"id": "slot:2", "username": "test-user", "role": "user", "read": False, "download": False}]
+    done = ctl.admin.apply_permissions("a.txt", [AccessChange("slot:2", "test-user", True, True)])
+    assert done and ctl.permissions.for_user("slot:2") == {"A.TXT": (True, True)}
+    ctl.admin.apply_permissions("A.TXT", [AccessChange("slot:2", "test-user", True, False)])
+    assert ctl.permissions.for_user("slot:2")["A.TXT"] == (True, False)
+    ctl.admin.apply_permissions("A.TXT", [AccessChange("slot:2", "test-user", False, True)])   # download without read is dropped
+    assert ctl.permissions.for_user("slot:2") == {}
+    with pytest.raises(ValidationError):
+        ctl.admin.apply_permissions("A.TXT", [AccessChange("slot:99", "nobody", True)])
+    assert any(r.action == "PERMISSION_CHANGE" for r in ctl.audit.query()[0])
+
+
+def test_user_session_gets_exactly_its_local_permissions():
+    rig = Rig([ST])
+    rig.ctl.permissions.set("slot:2", "x.txt", True, False)
+    rig.ctl.permissions.set("slot:2", "y.txt", True, True)
+    rig.connect()
+    rig.ctl.begin_auth()
+    rig.device_says("AUTH_PIN_VERIFIED:2")
+    g = rig.ctl.grants
+    assert g.lookup("X.TXT") == frozenset({"LIST", "READ"}) and g.lookup("y.txt") == frozenset({"LIST", "READ", "DOWNLOAD"})
+    assert g.lookup("other.txt") == frozenset()                       # default deny
+    rig.device_says("SESSION_ENDED")
+    assert rig.ctl.grants is None
 
 
 # ---------------------------------------------------------------- permission matrix: none / read / read+download
 FILES = {"a.txt": b"AAA", "b.txt": b"BBB", "c.txt": b"CCC"}
-IDX = GrantIndex({"a.txt": frozenset({"LIST", "READ"}), "b.txt": frozenset({"LIST", "READ"}), "c.txt": frozenset({"LIST"})},
-                 download_blocked={"b.txt"})
+IDX = GrantIndex({"a.txt": frozenset({"LIST", "READ", "DOWNLOAD"}), "b.txt": frozenset({"LIST", "READ"}), "c.txt": frozenset({"LIST"})})
 
 
 def sd_rig(role="user"):
@@ -180,7 +193,7 @@ def test_matrix_read_only_previews_but_download_denied(tmp_path):
     assert preview(r, "b.txt").value.data == b"BBB"
     n = len(r.ser.written)
     res = r.download("b.txt", tmp_path / "o")
-    assert res.error.code is SdErrorCode.FORBIDDEN and "Read-only" in res.error.message
+    assert res.error.code is SdErrorCode.FORBIDDEN and "Preview only" in res.error.message
     assert len(r.ser.written) == n and not (tmp_path / "o").exists()
 
 
@@ -309,11 +322,11 @@ def test_admin_device_view_merges_backend_and_local():
 # ---------------------------------------------------------------- local db versioning
 def test_schema_version_and_safe_reopen(tmp_path):
     db = LocalDb(tmp_path / "v.db")
-    assert db.version == SCHEMA_VERSION == 1
+    assert db.version == SCHEMA_VERSION == 3
     AuditStore(db).append("A")
     db.close()
     db2 = LocalDb(tmp_path / "v.db")                                # re-running migrations is a no-op, data kept
-    assert db2.version == 1 and AuditStore(db2).query()[1] == 1
+    assert db2.version == 3 and AuditStore(db2).query()[1] == 1
     db2.conn.execute("PRAGMA user_version = 99")
     db2.close()
     with pytest.raises(RuntimeError):

@@ -2,6 +2,8 @@
 
 Schema is versioned with PRAGMA user_version and migrated forward only (no destructive migrations).
 v1: audit_log (hash-chained, append-only via triggers), device_history, download_flags.
+v2: enrolled_users, face_consents (three-factor enrollment; face templates are DPAPI-encrypted).
+v3: file_permissions (local per-user Read/Download; the backend cannot map hardware logins to backend users).
 One connection guarded by a lock (the app writes from the GUI thread and the serial worker thread).
 """
 from __future__ import annotations
@@ -12,7 +14,7 @@ from pathlib import Path
 
 from .. import paths
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 _V1 = """
 CREATE TABLE audit_log (
@@ -44,7 +46,43 @@ CREATE TABLE download_flags (     -- LOCAL, CLIENT-ENFORCED-ONLY: 1 = download b
 );
 """
 
-MIGRATIONS = {1: _V1}
+_V2 = """
+CREATE TABLE enrolled_users (
+  user_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('admin','user')),
+  fingerprint_id INTEGER UNIQUE,            -- device AS608 slot (1..16), NULL until the device confirmed ENROLL_OK
+  face_template BLOB,                       -- DPAPI-encrypted SFace embedding; NEVER a photo
+  pin_set INTEGER NOT NULL DEFAULT 0,       -- device confirmed PIN_SET_OK (the PIN/hash is never on the PC)
+  status TEXT NOT NULL CHECK (status IN ('ENROLLED','INCOMPLETE','DISABLED','REVOKED')),
+  device_cleanup_pending INTEGER NOT NULL DEFAULT 0,
+  consent_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE face_consents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  captured_by TEXT,
+  text_version TEXT NOT NULL,
+  text_sha256 TEXT NOT NULL,
+  camera TEXT
+);
+"""
+
+_V3 = """
+CREATE TABLE file_permissions (   -- LOCAL, CLIENT-ENFORCED-ONLY: which enrolled user may Read (preview) / Download which SD file
+  user_id TEXT NOT NULL,          -- enrolled user id (production) or 'slot:N' (PIN test mode)
+  file TEXT NOT NULL,             -- upper-cased SD path (FAT is case-insensitive)
+  can_read INTEGER NOT NULL,
+  can_download INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, file)
+);
+"""
+
+MIGRATIONS = {1: _V1, 2: _V2, 3: _V3}
 
 
 class LocalDb:

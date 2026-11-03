@@ -1,8 +1,10 @@
 {
-  "_comment": "Copy to %LOCALAPPDATA%/HSS/config.json. Omit or set mode to 'production' for fail-closed production mode.",
+  "_comment": "Default config (created on first run). mode: pin_test = PIN-ONLY TEST MODE; production = fail-closed. manual_port is a fallback only (still verified with VERSION).",
   "mode": "pin_test",
   "usb_ids": [{"vid": "0483", "pid": "5740"}],
   "description_contains": [],
+  "probe": true,
+  "manual_port": null,
   "baud": 115200,
   "backend_url": null
 }

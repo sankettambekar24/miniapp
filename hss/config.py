@@ -14,6 +14,7 @@ MODE_PIN_TEST = "pin_test"
 # (see docs/FIRMWARE_ANALYSIS.md section 2). Whether the real board enumerates with it is
 # UNVERIFIED until a hardware test (tests/hardware/PIN_AUTH_TEST.md step 3).
 DEFAULT_USB_IDS = ((0x0483, 0x5740),)
+DEFAULT_VID_DESCRIPTIONS = ("USB Serial", "STM", "CDC", "Virtual COM", "HSS")
 
 
 @dataclass
@@ -21,6 +22,11 @@ class AppConfig:
     mode: str = MODE_PRODUCTION
     usb_ids: list[tuple[int, int]] = field(default_factory=lambda: list(DEFAULT_USB_IDS))
     description_contains: list[str] = field(default_factory=list)
+    # Used only together with a matching USB VID (0483): Windows names the board "USB Serial Device (COMn)".
+    vid_description_contains: list[str] = field(default_factory=lambda: list(DEFAULT_VID_DESCRIPTIONS))
+    probe: bool = True                 # fallback: send VERSION to candidate ports, accept only an HSS_FW: reply
+    probe_timeout: float = 2.0
+    manual_port: str | None = None     # fallback only (e.g. "COM15"); still verified with VERSION
     baud: int = 115200  # firmware .ino L995 (EXTERNAL-INO)
     scan_interval: float = 1.0
     post_open_delay: float = 0.5  # old app used 2 s (face_bridge.py:299); tunable, UNVERIFIED
@@ -51,6 +57,11 @@ def load_config(path: Path | None = None) -> AppConfig:
         if ids is not None:
             cfg.usb_ids = [(_hex(i["vid"]), _hex(i["pid"])) for i in ids]
         cfg.description_contains = [str(s) for s in raw.get("description_contains", [])]
+        if raw.get("vid_description_contains") is not None:
+            cfg.vid_description_contains = [str(x) for x in raw["vid_description_contains"]]
+        cfg.probe = bool(raw.get("probe", cfg.probe))
+        cfg.probe_timeout = float(raw.get("probe_timeout", cfg.probe_timeout))
+        cfg.manual_port = (str(raw["manual_port"]).strip() or None) if raw.get("manual_port") else None
         cfg.baud = int(raw.get("baud", cfg.baud))
         cfg.scan_interval = float(raw.get("scan_interval", cfg.scan_interval))
         cfg.post_open_delay = float(raw.get("post_open_delay", cfg.post_open_delay))

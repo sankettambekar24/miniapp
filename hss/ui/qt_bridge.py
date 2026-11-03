@@ -25,6 +25,10 @@ class QtBridge(QObject):
         if self.controller.manager.connected:
             return
         k = result.kind.value
+        busy = next((r["note"] for r in self.controller.manager.diagnostics if str(r["note"]).startswith("BUSY")), None)
+        if k == "one" and busy:
+            self.usb_changed.emit("USB: device found but port is BUSY (close other programs using it)")
+            return
         text = {"none": "USB: no HSS device found",
                 "multiple": "USB: multiple matching devices - unplug extras",
                 "one": "USB: device found, opening"}[k]

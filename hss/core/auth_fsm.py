@@ -87,7 +87,7 @@ class AuthFSM:
                 for cb in list(self.listeners):
                     cb(self)
             elif self._cfg.test_mode:
-                self._set(self.state, "Device connected")
+                self._set(self.state, "Device connected - enter your PIN on the device keypad")
             else:
                 self._set(self.state, PRODUCTION_MESSAGE)
 
@@ -141,7 +141,11 @@ class AuthFSM:
             self._set(AuthState.LOCKED, "Device locked out after too many failures - reset/power-cycle the device")
             return
         st = self.state
-        if k is EventKind.PIN_VERIFIED and st is AuthState.WAITING_PIN:
+        # The PIN is typed on the device at any time: the device is the source of truth, so a verified PIN is
+        # accepted while connected and not yet in a session (clicking "Start" first is optional), and a correct
+        # PIN after a wrong one needs no extra click.
+        entry = (AuthState.WAITING_PIN, AuthState.IDLE, AuthState.FAILED)
+        if k is EventKind.PIN_VERIFIED and st in entry:
             self._set(AuthState.VERIFIED, "PIN verified by device")
             ident = self._resolver.resolve(e.slot)
             if ident is None:
@@ -152,8 +156,8 @@ class AuthFSM:
             else:
                 self.session.start(ident)
                 self._set(AuthState.SESSION_ACTIVE, f"Signed in as {ident.name} ({ident.role})")
-        elif k in (EventKind.PIN_FAILED, EventKind.ACCESS_DENIED) and st is AuthState.WAITING_PIN:
-            self.attempts += 1
+        elif k in (EventKind.PIN_FAILED, EventKind.ACCESS_DENIED) and st in entry:
+            self.attempts = int(e.detail) if (e.detail or "").isdigit() else self.attempts + 1
             left = max(LOCKOUT_ATTEMPTS - self.attempts, 0)
             self._set(AuthState.FAILED, f"PIN rejected ({self.attempts}/{LOCKOUT_ATTEMPTS}); {left} attempt(s) before lockout")
         elif k in (EventKind.SESSION_ENDED, EventKind.SESSION_EXPIRED) and st is AuthState.SESSION_ACTIVE:

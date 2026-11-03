@@ -63,3 +63,43 @@ def test_admin_slot_routes_to_admin(app):
     rig.device_says("AUTH_PIN_VERIFIED:1")
     w.refresh()
     assert w.stack.currentIndex() == PAGE_ADMIN
+
+
+def test_demo_page_is_isolated_and_all_actions_disabled(app):
+    from PySide6.QtWidgets import QPushButton
+    rig = Rig([ST])
+    w = MainWindow(rig.ctl)
+    w.sidebar.setCurrentRow(5)
+    assert not w.demo_banner.isHidden() and "DEMO MODE" in w.demo_banner.text()
+    acts = [b for b in w.demo_page.findChildren(QPushButton) if b is not w.demo_page.exit_btn]
+    assert acts and all(not b.isEnabled() and b.toolTip() for b in acts)
+    assert rig.ctl.fsm.state.value == "IDLE" and not rig.ctl.session.active and not rig.opened
+    w.sidebar.setCurrentRow(PAGE_AUTH)
+    assert w.demo_banner.isHidden()
+
+
+def test_diagnostics_page_lists_ports_and_rescan(app):
+    rig = Rig([ST])
+    w = MainWindow(rig.ctl)
+    rig.connect()
+    w.diag_page.refresh()
+    assert w.diag_page.table.rowCount() == 1 and w.diag_page.table.item(0, 4).text() == "CONNECTED"
+    w.diag_page.manual.setText("com15")
+    w.diag_page._use_manual()
+    assert rig.cfg.manual_port == "COM15"
+
+
+def test_first_run_creates_default_test_mode_files(tmp_path, monkeypatch):
+    import json
+    from hss import paths
+    from hss.config import load_config
+    from hss.core.identity import IdentityResolver
+    from hss.firstrun import ensure_first_run
+    monkeypatch.setenv("HSS_DATA_DIR", str(tmp_path))
+    made = ensure_first_run()
+    assert "config.json" in made and "test_identities.json" in made
+    assert load_config().test_mode
+    r = IdentityResolver.load()
+    assert r.resolve(1).role == "admin" and r.resolve(2).role == "user"
+    (tmp_path / "config.json").write_text('{"mode": "production"}')
+    assert ensure_first_run() == [] and not load_config().test_mode  # never overwrites

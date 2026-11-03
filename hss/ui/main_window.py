@@ -12,10 +12,12 @@ from .dashboards import Ctx, build_dashboard
 from .sd_page import make_sd_page
 from ..core.auth_fsm import PRODUCTION_MESSAGE, AuthState
 from ..factors.base import FACE, FINGERPRINT
+from .demo import DEMO_BANNER, DemoPage
+from .diagnostics import DiagnosticsPage
 from .qt_bridge import QtBridge
 
 BANNER_TEXT = "PIN-ONLY TEST MODE - not production authentication"
-PAGE_AUTH, PAGE_ADMIN, PAGE_USER, PAGE_LOG = range(4)
+PAGE_AUTH, PAGE_ADMIN, PAGE_USER, PAGE_LOG, PAGE_DIAG, PAGE_DEMO = range(6)
 
 
 class MainWindow(QMainWindow):
@@ -38,12 +40,18 @@ class MainWindow(QMainWindow):
         self.banner.setStyleSheet("background:#c62828;color:white;font-weight:bold;padding:6px;")
         self.banner.setVisible(controller.config.test_mode)
         outer.addWidget(self.banner)
+        self.demo_banner = QLabel(DEMO_BANNER)
+        self.demo_banner.setObjectName("demoBanner")
+        self.demo_banner.setAlignment(Qt.AlignCenter)
+        self.demo_banner.setStyleSheet("background:#ef6c00;color:white;font-weight:bold;padding:6px;")
+        self.demo_banner.setVisible(False)
+        outer.addWidget(self.demo_banner)
 
         body = QHBoxLayout()
         outer.addLayout(body)
         self.sidebar = QListWidget()
         self.sidebar.setFixedWidth(190)
-        for label in ("Authentication", "Admin dashboard", "User dashboard", "Device log"):
+        for label in ("Authentication", "Admin dashboard", "User dashboard", "Device log", "Diagnostics", "Demo mode"):
             self.sidebar.addItem(QListWidgetItem(label))
         self.sidebar.currentRowChanged.connect(self._on_sidebar)
         body.addWidget(self.sidebar)
@@ -51,7 +59,6 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         body.addWidget(self.stack, 1)
         self.stack.addWidget(self._build_auth_page())
-        self.session_info: list = []
         self.admin_host, self.user_host = QWidget(), QWidget()
         for host in (self.admin_host, self.user_host):
             QVBoxLayout(host).setContentsMargins(0, 0, 0, 0)
@@ -60,6 +67,11 @@ class MainWindow(QMainWindow):
         self.dash_ctx: Ctx | None = None
         self.log_view = QPlainTextEdit(readOnly=True)
         self.stack.addWidget(self.log_view)
+        self.diag_page = DiagnosticsPage(controller)
+        self.stack.addWidget(self.diag_page)
+        self.demo_page = DemoPage()
+        self.demo_page.exit_requested.connect(lambda: self.sidebar.setCurrentRow(PAGE_AUTH))
+        self.stack.addWidget(self.demo_page)
 
         self.usb_label = QLabel("USB: searching")
         self.mode_label = QLabel()
@@ -69,25 +81,12 @@ class MainWindow(QMainWindow):
             self.statusBar().addPermanentWidget(QLabel(" | "))
         self.bridge.auth_changed.connect(self.refresh)
         self.bridge.usb_changed.connect(self.usb_label.setText)
+        self.bridge.usb_changed.connect(self.usb_detail.setText)
         self.bridge.device_line.connect(self._append_log)
         self.refresh()
         self.sidebar.setCurrentRow(PAGE_AUTH)
 
     # ---- pages ----
-    def _placeholder(self, title: str, text: str) -> QWidget:
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        h = QLabel(title)
-        h.setStyleSheet("font-size:20px;font-weight:bold;")
-        lay.addWidget(h)
-        lay.addWidget(QLabel(text + "\nNot implemented yet (NOT-STARTED)."))
-        self.session_info = getattr(self, "session_info", [])
-        info = QLabel("")
-        self.session_info.append(info)
-        lay.addWidget(info)
-        lay.addStretch(1)
-        return w
-
     def _build_auth_page(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
@@ -98,12 +97,16 @@ class MainWindow(QMainWindow):
         self.state_label.setObjectName("stateLabel")
         self.state_label.setStyleSheet("font-size:16px;")
         self.state_label.setWordWrap(True)
+        self.usb_detail = QLabel("USB: searching")
+        self.usb_detail.setObjectName("usbDetail")
+        self.usb_detail.setWordWrap(True)
         self.start_btn = QPushButton("Start authentication")
         self.start_btn.clicked.connect(self._on_start)
         self.signout_btn = QPushButton("Sign out")
         self.signout_btn.clicked.connect(self.ctl.sign_out)
         lay.addWidget(self.mode_title)
         lay.addWidget(self.state_label)
+        lay.addWidget(self.usb_detail)
         lay.addWidget(self.start_btn)
         lay.addWidget(self.signout_btn)
         box = QFrame()
@@ -130,6 +133,7 @@ class MainWindow(QMainWindow):
             self.sidebar.setCurrentRow(PAGE_AUTH)
             return
         self.stack.setCurrentIndex(max(row, 0))
+        self.demo_banner.setVisible(row == PAGE_DEMO)
 
     def _allowed(self, row: int) -> bool:
         ident = self.ctl.session.identity
@@ -174,8 +178,11 @@ class MainWindow(QMainWindow):
         can_start = test and fsm.connected and fsm.state in (AuthState.IDLE, AuthState.FAILED, AuthState.LOCKED_ON_DISCONNECT)
         self.start_btn.setEnabled(can_start)
         self.start_btn.setToolTip("" if can_start else
-                                  (PRODUCTION_MESSAGE if not test else "Connect the device first, or authentication is already in progress/locked"))
+                                  (PRODUCTION_MESSAGE if not test else "Connect the device first (see Diagnostics), or authentication is already in progress/locked"))
+        if test and fsm.connected and fsm.state in (AuthState.IDLE, AuthState.FAILED):
+            self.start_btn.setToolTip("Optional: you can also just type your PIN on the device keypad and press #.")
         self.signout_btn.setEnabled(fsm.state is AuthState.SESSION_ACTIVE)
+        self.signout_btn.setToolTip("" if fsm.state is AuthState.SESSION_ACTIVE else "No active session to sign out of.")
         # role-based routing: role comes only from the local identity file via the FSM
         ident = self.ctl.session.identity
         for row, role in ((PAGE_ADMIN, "admin"), (PAGE_USER, "user")):

@@ -28,7 +28,8 @@ from enum import Enum
 from typing import Callable
 
 from ..config import AppConfig
-from .discovery import DiscoveryKind, DiscoveryResult, PortInfo, discover, list_system_ports
+from .discovery import (DiscoveryKind, DiscoveryResult, PortInfo, discover, list_system_ports, port_matches,
+                        probe_candidates)
 from .protocol import EventKind, MAX_LINE, MAX_WIRE_ID, REQ_BEGIN_PREFIX, REQ_END_PREFIX, parse_line, wire_command
 
 log = logging.getLogger("hss.serial")
@@ -299,6 +300,11 @@ class SerialManager:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.dropped_overlong = 0
+        self._rescan = False
+        self._probe_cache: dict[tuple, str] = {}   # (device, serial#) -> result text of the VERSION probe
+        self._open_errors: dict[str, str] = {}
+        self.diagnostics: list[dict] = []          # per-port rows for the Diagnostics panel (replaced atomically)
+        self.diag_summary = "not scanned yet"
         self.wire_ids = False  # set True only after VERSION reports REQID=1 (Stage 4 handshake)
         # callbacks (invoked on the worker thread)
         self.on_connected: list[Callable[[int, PortInfo], None]] = []
@@ -352,6 +358,10 @@ class SerialManager:
         self._cmdq.put(_Tx(rid, fn, timeout, callback, guard))
         return rid
 
+    def rescan(self) -> None:
+        """Forget probe results and scan again on the next worker tick (Rescan button)."""
+        self._rescan = True
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -377,6 +387,11 @@ class SerialManager:
 
     def pump(self) -> None:
         now = self._clock()
+        if self._rescan:
+            self._rescan = False
+            self._probe_cache.clear()
+            self._open_errors.clear()
+            self._next_scan = 0.0
         if self._ser is None:
             self._reject_queued("not connected")
             if now >= self._next_scan:
@@ -386,7 +401,9 @@ class SerialManager:
         if now >= self._next_scan:  # hot-unplug detection
             self._next_scan = now + self.config.scan_interval
             try:
-                devices = {p.device for p in self._lister()}
+                listed = self._lister()
+                devices = {p.device for p in listed}
+                self._update_diag(listed, connected=self._port.device if self._port else None)
             except Exception:
                 devices = {self._port.device} if self._port else set()
             if self._port and self._port.device not in devices:
@@ -405,12 +422,97 @@ class SerialManager:
             self._feed(data)
         self._check_timeout(self._clock())
 
+    @staticmethod
+    def _open_error_text(exc: Exception) -> str:
+        t = f"{type(exc).__name__}: {exc}"
+        if "PermissionError" in t or "Access is denied" in t or "busy" in t.lower():
+            return "BUSY - port is in use by another program (close it: serial monitor, Arduino IDE, old app)"
+        return f"open failed: {t[:120]}"
+
+    def _update_diag(self, ports: list[PortInfo], connected: str | None = None) -> None:
+        rows = []
+        for p in ports:
+            matched = port_matches(p, self.config)
+            if connected == p.device:
+                note = "CONNECTED"
+            else:
+                note = self._open_errors.get(p.device) or next(
+                    (v for (d, _sn), v in self._probe_cache.items() if d == p.device), "")
+                if not note:
+                    note = "matches HSS list" if matched else "not matched (not tried)"
+            rows.append({"device": p.device, "vid": p.vid, "pid": p.pid, "description": p.description,
+                         "matched": matched, "note": note})
+        self.diagnostics = rows
+
+    def _probe(self, port: PortInfo):
+        """Open `port`, send VERSION, accept only an HSS_FW: reply. Returns (serial_or_None, result_text)."""
+        try:
+            ser = self._factory(port.device, self.config.baud)
+        except Exception as exc:
+            return None, self._open_error_text(exc)
+        ok = False
+        try:
+            if self.config.post_open_delay:
+                self._sleep(self.config.post_open_delay)
+            try:
+                ser.reset_input_buffer()
+            except Exception:
+                pass
+            ser.write(b"VERSION\n")
+            buf = bytearray()
+            for _ in range(max(1, int(self.config.probe_timeout / 0.05))):
+                data = ser.read(max(1, getattr(ser, "in_waiting", 0) or 1))
+                if data:
+                    buf += data
+                    if any(ln.strip(b"\r").startswith(b"HSS_FW:") for ln in buf.split(b"\n")):
+                        ok = True
+                        break
+                else:
+                    self._sleep(0.05)
+        except Exception as exc:
+            try:
+                ser.close()
+            except Exception:
+                pass
+            return None, f"probe I/O error: {type(exc).__name__}"
+        if ok:
+            return ser, "HSS_FW reply received (probe)"
+        try:
+            ser.close()
+        except Exception:
+            pass
+        return None, "no HSS_FW reply to VERSION (not an HSS board)"
+
     def _scan_and_connect(self) -> None:
         try:
-            result = discover(self._lister(), self.config)
+            ports = self._lister()
+            result = discover(ports, self.config)
         except Exception:
             log.exception("port listing failed")
             return
+        live = {p.device for p in ports}
+        self._probe_cache = {k: v for k, v in self._probe_cache.items() if k[0] in live}
+        self._open_errors = {d: v for d, v in self._open_errors.items() if d in live}
+        ser, port = None, None
+        if result.kind is DiscoveryKind.NONE and (self.config.probe or self.config.manual_port):
+            cands = probe_candidates(ports) if self.config.probe else []
+            mp = self.config.manual_port
+            if mp:  # manual override: fallback only, tried first, still verified with VERSION
+                cands = [p for p in ports if p.device.upper() == mp.upper()] + \
+                        [p for p in cands if p.device.upper() != mp.upper()]
+            for p in cands:
+                key = (p.device, p.serial_number)
+                if key in self._probe_cache:
+                    continue
+                ser, text = self._probe(p)
+                self._probe_cache[key] = text
+                if ser is not None:
+                    port = p
+                    result = DiscoveryResult(DiscoveryKind.ONE, (p,))
+                    break
+        self._update_diag(ports)
+        self.diag_summary = {DiscoveryKind.NONE: "no HSS device found", DiscoveryKind.ONE: "one HSS device",
+                             DiscoveryKind.MULTIPLE: "multiple matching devices (ambiguous)"}[result.kind]
         key = (result.kind, tuple(p.device for p in result.ports))
         if key != self._last_scan:
             self._last_scan = key
@@ -418,23 +520,29 @@ class SerialManager:
                 cb(result)
         if result.kind is not DiscoveryKind.ONE:
             return  # none, or ambiguous: never guess
-        port = result.port
-        try:
-            ser = self._factory(port.device, self.config.baud)
-        except Exception as exc:
-            log.warning("open %s failed: %s", port.device, type(exc).__name__)
-            return
-        if self.config.post_open_delay:
-            self._sleep(self.config.post_open_delay)
-        try:
-            ser.reset_input_buffer()  # flush stale input from before we connected
-        except Exception:
-            pass
+        if ser is None:
+            port = result.port
+            try:
+                ser = self._factory(port.device, self.config.baud)
+            except Exception as exc:
+                self._open_errors[port.device] = self._open_error_text(exc)
+                log.warning("open %s failed: %s", port.device, type(exc).__name__)
+                self._update_diag(ports)
+                self._last_scan = None  # re-announce so the UI can show BUSY
+                return
+            self._open_errors.pop(port.device, None)
+            if self.config.post_open_delay:
+                self._sleep(self.config.post_open_delay)
+            try:
+                ser.reset_input_buffer()  # flush stale input from before we connected
+            except Exception:
+                pass
         self._ser, self._port = ser, port
         self._rx.clear()
         self._discarding = False
         self._inflight = None
         self._conn_gen += 1
+        self._update_diag(ports, connected=port.device)
         log.info("connected %s gen=%d", port.device, self._conn_gen)
         for cb in list(self.on_connected):
             cb(self._conn_gen, port)

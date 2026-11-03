@@ -142,12 +142,25 @@ def test_production_mode_fail_closed():
 
 
 # ---- stale message rejection ----
-def test_verified_while_idle_is_stale_and_ignored(rig):
+def test_pin_typed_before_start_click_is_accepted(rig):
+    # The device is the source of truth: Start is optional (firmware has no "start" command).
     rig.connect()
-    rig.device_says(OK1)  # PIN typed before the user started authentication
-    fsm = rig.ctl.fsm
-    assert fsm.state is AuthState.IDLE and fsm.stale_rejected == 1
-    assert not rig.ctl.session.active
+    rig.device_says(OK1)
+    assert rig.ctl.fsm.state is AuthState.SESSION_ACTIVE and rig.ctl.session.identity.role == "admin"
+
+
+def test_correct_pin_after_wrong_pin_needs_no_extra_click(rig):
+    rig.connect()
+    rig.device_says("AUTH_PIN_FAILED:1")
+    assert rig.ctl.fsm.state is AuthState.FAILED and rig.ctl.fsm.attempts == 1
+    rig.device_says(OK2)
+    assert rig.ctl.fsm.state is AuthState.SESSION_ACTIVE and rig.ctl.session.identity.role == "user"
+
+
+def test_keypad_c_session_end_echo_ends_session(rig):
+    authed(rig, OK1)
+    rig.device_says("DBG: EVENT ACCESS_SESSION_ENDED")
+    assert rig.ctl.fsm.state is AuthState.IDLE and not rig.ctl.session.active
 
 
 def test_verified_after_session_already_active_is_stale(rig):

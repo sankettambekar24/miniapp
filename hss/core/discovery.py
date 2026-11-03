@@ -41,6 +41,8 @@ def port_matches(p: PortInfo, cfg: AppConfig) -> bool:
     if p.vid is not None and p.pid is not None and (p.vid, p.pid) in {tuple(x) for x in cfg.usb_ids}:
         return True
     desc = p.description.lower()
+    if p.vid is not None and p.vid in {int(x[0]) for x in cfg.usb_ids} and             any(s.lower() in desc for s in cfg.vid_description_contains if s):
+        return True  # right vendor (0483) + plausible product string, PID differs
     return any(s.lower() in desc for s in cfg.description_contains if s)
 
 
@@ -51,3 +53,10 @@ def discover(ports: list[PortInfo], cfg: AppConfig) -> DiscoveryResult:
     if len(hits) == 1:
         return DiscoveryResult(DiscoveryKind.ONE, hits)
     return DiscoveryResult(DiscoveryKind.MULTIPLE, hits)
+
+
+def probe_candidates(ports: list[PortInfo]) -> list[PortInfo]:
+    """Ports worth sending VERSION to: real USB devices only (VID present); Bluetooth virtual COMs are skipped
+    because opening them can block for many seconds."""
+    return sorted((p for p in ports if p.vid is not None and "bluetooth" not in p.description.lower()),
+                  key=lambda p: p.device)

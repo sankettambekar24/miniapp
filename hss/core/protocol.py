@@ -22,6 +22,7 @@ LEGACY_LOCKED = ("DBG: SYSTEM LOCKED", "DBG: EVENT SYSTEM_LOCKED")  # .ino L943-
 LEGACY_ACCESS_GRANTED = "RESULT: ACCESS GRANTED"     # .ino L987
 LEGACY_ACCESS_DENIED = "RESULT: ACCESS DENIED"       # .ino L968, L976
 LEGACY_SESSION_ENDED = "SESSION_ENDED"               # .ino L851
+LEGACY_SESSION_END_ECHOES = ("DBG: EVENT ACCESS_SESSION_ENDED", "DBG: EVENT ACCESS_SESSION_EXPIRED")  # .ino keypad C
 LEGACY_SESSION_EXPIRED = "SESSION_EXPIRED"           # .ino L350
 LEGACY_FACE_SCAN = "FACE_SCAN"                       # .ino L235
 LEGACY_FINGERPRINT_SCAN = "FINGERPRINT_SCAN"         # .ino L274
@@ -76,7 +77,10 @@ def parse_line(text: str) -> DeviceEvent:
     if t == LEGACY_PIN_FAILED:
         return DeviceEvent(EventKind.PIN_FAILED)
     if t == PLANNED_PIN_FAILED_PREFIX or t.startswith(PLANNED_PIN_FAILED_PREFIX + ":"):
-        return DeviceEvent(EventKind.PIN_FAILED, planned=True)
+        n = t.split(":", 1)[1] if ":" in t else ""
+        return DeviceEvent(EventKind.PIN_FAILED, planned=True, detail=n if n.isdigit() else None)
+    if t in LEGACY_SESSION_END_ECHOES:  # keypad 'C' / host END_SESSION: firmware only logs "DBG: EVENT ..."
+        return DeviceEvent(EventKind.SESSION_ENDED, detail=t)
     if t in LEGACY_LOCKED:
         return DeviceEvent(EventKind.LOCKED)
     if t == PLANNED_LOCKED:

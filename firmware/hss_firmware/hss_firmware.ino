@@ -27,6 +27,15 @@
 // pins_local.h defines HSS_PIN_SLOT1 / HSS_PIN_SLOT2 (digit strings). It is NOT committed.
 // Copy pins_local.example.h to pins_local.h (build.ps1 does this with random test PINs).
 #include "pins_local.h"
+// HSS-S7: ATECC608A secure element on the shared I2C bus (PB8/PB9, address 0x60). Stage 1 = DETECT ONLY:
+// nothing is ever written to or locked on the chip by this firmware (locking is permanent).
+// Needs the "ArduinoECCX08" library (1.4.1). Build with -DHSS_SECURE_ELEMENT=0 to leave it out.
+#ifndef HSS_SECURE_ELEMENT
+#define HSS_SECURE_ELEMENT 1
+#endif
+#if HSS_SECURE_ELEMENT
+#include <ArduinoECCX08.h>
+#endif
 #if HSS_REQUIRE_FACTORS
 #include <EEPROM.h>
 #include "hss_crypto.h"
@@ -89,6 +98,7 @@ unsigned long lastAuthorizedActivity = 0;
 bool enrollmentAuthorized = false;
 unsigned long enrollmentAuthorizedAt = 0;
 bool discardHostCommand = false;
+bool seFound = false, seConfigLocked = false, seDataLocked = false;  // filled by probeSecureElement() at boot
 // Three-factor build state (declared unconditionally so shared helpers compile in both builds).
 bool bootstrapSession = false;  // enrollment-only session opened by the bootstrap PIN while the user store is empty
 bool haveUsers = false;
@@ -1219,9 +1229,44 @@ void deleteUserFromHost(const char* arg) {
 }
 #endif  // HSS_REQUIRE_FACTORS
 
+// HSS-S7: read-only probe. Reads the 128-byte config zone; byte 86 = data/OTP lock, byte 87 = config lock
+// (0x55 = unlocked, 0x00 = locked). Writes nothing.
+void probeSecureElement() {
+#if HSS_SECURE_ELEMENT
+  if (!ECCX08.begin()) {
+    Serial.println("DBG: SE_ATECC_NOT_FOUND (expected at I2C 0x60 on PB8/PB9)");
+    return;
+  }
+  seFound = true;
+  byte cfg[128];
+  if (ECCX08.readConfiguration(cfg)) {
+    seConfigLocked = (cfg[87] != 0x55);
+    seDataLocked = (cfg[86] != 0x55);
+  }
+  Serial.print("DBG: SE_ATECC_FOUND config_locked=");
+  Serial.print(seConfigLocked ? 1 : 0);
+  Serial.print(" data_locked=");
+  Serial.print(seDataLocked ? 1 : 0);
+  Serial.print(" revision=0x");
+  Serial.println(cfg[7], HEX);
+#else
+  Serial.println("DBG: SE_DISABLED_IN_BUILD");
+#endif
+}
+
 void dispatchHostCommand(const char* command) {
   // HSS-S3: VERSION is answered even when locked or unauthenticated; it reveals no data and lets the
   // desktop identify the protocol generation (FIRMWARE_ANALYSIS.md conflict 9: flashed build unproven).
+  // HSS-S7: secure element status (allowed before authentication: it reveals no secret).
+  if (strcmp(command, "SE_INFO") == 0) {
+    Serial.print("SE_INFO:PRESENT=");
+    Serial.print(seFound ? 1 : 0);
+    Serial.print(":CONFIG_LOCKED=");
+    Serial.print(seConfigLocked ? 1 : 0);
+    Serial.print(":DATA_LOCKED=");
+    Serial.println(seDataLocked ? 1 : 0);
+    return;
+  }
   if (strcmp(command, "VERSION") == 0) {
     Serial.print("HSS_FW:");
     Serial.print(HSS_FW_VERSION);
@@ -1511,6 +1556,7 @@ void setup() {
     while (true) delay(1000);
   }
   showMessage("SYSTEM", "STARTING");
+  probeSecureElement();
 
   if (!slotPinsValid()) {  // HSS-S3
     showMessage("PIN CONFIG", "INVALID");

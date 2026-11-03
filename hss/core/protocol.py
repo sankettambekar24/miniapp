@@ -194,13 +194,13 @@ FIRMWARE_EMITS = (
 )
 # Host commands the firmware must accept (strcmp / strncmp on `command`):
 HOST_COMMANDS = (CMD_END_SESSION, CMD_LIST_FILES, CMD_VERSION, "READ_FILE:", "WRITE_FILE:", "ENROLL_FINGERPRINT:", "SET_PIN:",
-                 "DELETE_USER:")
+                 "DELETE_USER:", "SE_INFO")
 # Host replies read by the firmware while it waits for the face result (waitFaceVerdict):
 HOST_FACE_REPLIES = ("FACE_VERIFIED:", "FACE_DENIED:")
 # Firmware lines that exist but the desktop deliberately does not parse (explicit allowlist, so any NEW
 # firmware line without a desktop decision fails the conformance test):
 FIRMWARE_IGNORED_BY_DESKTOP = (
-    "ENROLL_AUTHORIZED:", "READ_ERROR:",
+    "ENROLL_AUTHORIZED:", "READ_ERROR:", "SE_INFO:",
     "PROTECTED_DATA_BEGIN", "PROTECTED_DATA_END", "WRITE_CHUNK_READY:",
 )
 # Legacy `DBG: EVENT <NAME>` echoes the desktop still understands, derived from event names in the firmware:

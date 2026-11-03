@@ -110,3 +110,8 @@ Enrollment / revocation (host -> device, need an access session AND local author
 When the last PIN record is deleted the device returns to bootstrap setup mode (physical possession + bootstrap PIN).
 
 Boot (three-factor build, users present): templates in slots 1..16 with no PIN record are deleted (`DBG: FP_ORPHAN_TEMPLATES_DELETED=<n>`). Bootstrap (`BOOTSTRAP_OK`) first empties the whole sensor library (`DBG: FP_LIBRARY_EMPTIED_STATUS=<code>`).
+
+## 13. Secure element (ATECC608A) - stage 1: DETECT ONLY (firmware 0.4.0-stage6+, compiled, not hardware-verified)
+Shared I2C bus PB8/PB9, address 0x60, library ArduinoECCX08 1.4.1 (LGPL-2.1). The firmware never writes or locks the chip.
+`SE_INFO` (host -> device, allowed before authentication, reveals no secret) -> `SE_INFO:PRESENT=<0|1>:CONFIG_LOCKED=<0|1>:DATA_LOCKED=<0|1>`.
+Boot lines: `DBG: SE_ATECC_FOUND config_locked=<0|1> data_locked=<0|1> revision=0x<hex>` or `DBG: SE_ATECC_NOT_FOUND ...`.

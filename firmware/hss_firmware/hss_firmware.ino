@@ -1468,11 +1468,45 @@ void setup() {
     pinMode(colPins[i], INPUT_PULLUP);
   }
 
+  // HSS-S6: I2C bus recovery + OLED presence check. A reset in the middle of an I2C transfer (e.g. during flashing)
+  // can leave the OLED holding SDA low: NRST resets the MCU but not the OLED, and the display then stays blank
+  // although everything else runs. Up to 9 SCL pulses release it. Adafruit's begin() does NOT detect a missing
+  // display (it only fails if malloc fails), so we probe the address ourselves and report it.
+  pinMode(PB9, INPUT_PULLUP);
+  pinMode(PB8, OUTPUT_OPEN_DRAIN);
+  digitalWrite(PB8, HIGH);
+  delayMicroseconds(10);
+  uint8_t pulses = 0;
+  while (digitalRead(PB9) == LOW && pulses < 9) {
+    digitalWrite(PB8, LOW);
+    delayMicroseconds(10);
+    digitalWrite(PB8, HIGH);
+    delayMicroseconds(10);
+    pulses++;
+  }
+  Serial.print("DBG: I2C_SDA=");
+  Serial.print(digitalRead(PB9) == HIGH ? "HIGH" : "STUCK_LOW");
+  Serial.print(" RECOVERY_PULSES=");
+  Serial.println(pulses);
+
   Wire.setSCL(PB8);
   Wire.setSDA(PB9);
   Wire.begin();
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+  uint8_t oledAddr = 0;
+  const uint8_t candidates[2] = {OLED_ADDR, 0x3D};
+  for (uint8_t i = 0; i < 2 && oledAddr == 0; i++) {
+    Wire.beginTransmission(candidates[i]);
+    if (Wire.endTransmission() == 0) oledAddr = candidates[i];
+  }
+  Serial.print("DBG: OLED_I2C_ADDR=0x");
+  Serial.println(oledAddr, HEX);  // 0x0 = no display answered on PB8/PB9
+  if (oledAddr == 0) {
+    Serial.println("DBG: OLED NOT ANSWERING (check VCC/GND/SCL=PB8/SDA=PB9); continuing without display");
+    oledAddr = OLED_ADDR;
+  }
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, oledAddr)) {
     Serial.println("DBG: OLED NOT FOUND");
     while (true) delay(1000);
   }

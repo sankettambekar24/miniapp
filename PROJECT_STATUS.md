@@ -29,3 +29,6 @@ Date: 2026-11-03. Stages 1-5 done, Stage 6 groundwork done (installer built, dev
 
 ## Live backend result (2026-11-03)
 All approved writes and cleanup succeeded; see FEATURE_PARITY 1d and docs/TEST_REPORT.md. Remaining hsstest_ rows cannot be deleted (no DELETE routes). Claude never held credentials; no write was run by Claude.
+
+## First hardware report (2026-11-03, user)
+Flashed a single-file Stage 3 build: correct PIN gave INCORRECT. Cause (code-derived): PIN was cleared before comparison (`authenticate()` revoked the session first). Fixed in the repo sketch + regression test; 368 tests pass; the fix has NOT been re-run on hardware. Generate the IDE one-file sketch with `firmware\make_single_file.ps1`. Not VERIFIED-HARDWARE (no logs captured). The previously flashed firmware was overwritten (see DECISIONS 36).

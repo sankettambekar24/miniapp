@@ -21,3 +21,5 @@ dist/
 build/
 
 tests/live/APPROVED_ENDPOINTS.txt
+
+firmware/single_file/

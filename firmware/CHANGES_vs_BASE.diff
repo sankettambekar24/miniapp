@@ -1,5 +1,5 @@
-﻿diff --git "a/C:\\Users\\sanke\\AppData\\Local\\Temp\\b.ino" "b/C:\\Users\\sanke\\AppData\\Local\\Temp\\n.ino"
-index bc316fd..0d2b61f 100644
+diff --git "a/C:\\Users\\sanke\\AppData\\Local\\Temp\\b.ino" "b/C:\\Users\\sanke\\AppData\\Local\\Temp\\n.ino"
+index 35263c2..c8a0704 100644
 --- "a/C:\\Users\\sanke\\AppData\\Local\\Temp\\b.ino"
 +++ "b/C:\\Users\\sanke\\AppData\\Local\\Temp\\n.ino"
 @@ -3,4 +3,8 @@
@@ -160,20 +160,26 @@ index bc316fd..0d2b61f 100644
 +    Serial.println("AUTH_LOCKED");  // HSS-S3 (planned string); legacy lines follow
      clearEnrollmentAuthorization();
      logEvent("SYSTEM_LOCKED");
-@@ -952,8 +1034,11 @@ void authenticate() {
+@@ -950,10 +1032,16 @@ bool registerFailure(const char* eventName) {
+ 
+ void authenticate() {
++  // HSS-S3 FIX: compare the entered PIN BEFORE revoking the old session. revokeAccessSession() calls
++  // clearPIN(), so revoking first wiped the entered PIN and every attempt was "INCORRECT" (this ordering
++  // was also in the base sketch). Found on the user's first hardware flash, 2026-11-03.
++  uint8_t slot = matchedSlot();
++  bool pinOk = (slot != 0);
++  clearPIN();
    // Never carry a previous session into a new authentication attempt.
    revokeAccessSession("SESSION_REVOKED_FOR_REAUTH");
 -  bool pinOk = pinMatches();
-+  uint8_t slot = matchedSlot();
-+  bool pinOk = (slot != 0);
-   clearPIN();
+-  clearPIN();
  
    if (!pinOk) {
 +    Serial.print("AUTH_PIN_FAILED:");  // HSS-S3: attempt number (1..MAX_ATTEMPTS)
 +    Serial.println(wrongAttempts + 1);
      if (registerFailure("PIN_FAILED")) return;
      showMessage("PIN", "INCORRECT");
-@@ -962,6 +1047,7 @@ void authenticate() {
+@@ -962,6 +1050,7 @@ void authenticate() {
    }
  
 -  logEvent("PIN_VERIFIED");
@@ -182,7 +188,7 @@ index bc316fd..0d2b61f 100644
 +#if HSS_REQUIRE_FACTORS
    if (!verifyFace()) {
      showMessage("FACE", "DENIED");
-@@ -979,10 +1065,16 @@ void authenticate() {
+@@ -979,10 +1068,16 @@ void authenticate() {
      return;
    }
 +#endif  // HSS_REQUIRE_FACTORS
@@ -199,7 +205,7 @@ index bc316fd..0d2b61f 100644
 +  Serial.println(slot);
    Serial.println("RESULT: ACCESS GRANTED");
    logEvent("ACCESS_GRANTED");
-@@ -1015,12 +1107,22 @@ void setup() {
+@@ -1015,12 +1110,22 @@ void setup() {
    showMessage("SYSTEM", "STARTING");
  
 +  if (!slotPinsValid()) {  // HSS-S3

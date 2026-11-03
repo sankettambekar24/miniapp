@@ -64,3 +64,7 @@
 - STM32CubeProgrammer: install manually (st.com login) before the flash test.
 - Which physical pins does the fingerprint UART use on your wiring? (build uses core USART2 defaults)
 - Approve (or edit) the 6 backend write endpoints listed in the stop-gate report / BACKEND_LIVE_TEST.md.
+
+34. **Auth-order bug found on first flash (2026-11-03):** see FIRMWARE_ANALYSIS s14. My Stage 3 change kept the base ordering and I never ran it on a board, so it shipped broken; the user found it. Fixed + regression test (368 tests).
+35. **Single-file IDE sketch:** the user inlined the PINs into the repo `.ino` (removing `#include "pins_local.h"` and `pins_local.example.h`). That would have committed PIN literals (the PIN-literal test caught it). Restored the include; `firmware/make_single_file.ps1` now generates a git-ignored one-file sketch with the PINs from `pins_local.h` inlined. `pins_local.h` was set to the user's 1234 / 4321 (the PINs already on their board; weak, user's choice).
+36. **Backup gate note:** the user flashed via the IDE before any "BACKUP CONFIRMED", so the previously flashed firmware has been overwritten; if it was never dumped it can no longer be recovered. The original sketch in the WhatsApp cache is the only remaining source.

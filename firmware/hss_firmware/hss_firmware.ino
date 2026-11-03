@@ -1031,11 +1031,14 @@ bool registerFailure(const char* eventName) {
 }
 
 void authenticate() {
-  // Never carry a previous session into a new authentication attempt.
-  revokeAccessSession("SESSION_REVOKED_FOR_REAUTH");
+  // HSS-S3 FIX: compare the entered PIN BEFORE revoking the old session. revokeAccessSession() calls
+  // clearPIN(), so revoking first wiped the entered PIN and every attempt was "INCORRECT" (this ordering
+  // was also in the base sketch). Found on the user's first hardware flash, 2026-11-03.
   uint8_t slot = matchedSlot();
   bool pinOk = (slot != 0);
   clearPIN();
+  // Never carry a previous session into a new authentication attempt.
+  revokeAccessSession("SESSION_REVOKED_FOR_REAUTH");
 
   if (!pinOk) {
     Serial.print("AUTH_PIN_FAILED:");  // HSS-S3: attempt number (1..MAX_ATTEMPTS)

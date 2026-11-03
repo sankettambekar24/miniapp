@@ -80,3 +80,6 @@ Any new firmware line must be added to the parsed or the ignored list, otherwise
 | 6 | `VERSION` | flashed-vs-sketch uncertainty (`CONFLICTS.md` (firmware section, item 9)) |
 | 7 | Missing AS608 non-fatal in PIN-only build | base halts forever; PIN-only must not depend on the sensor |
 Unchanged: pins, UART 115200 / fingerprint 57600, OLED/I2C, SD chip select and SPI pins, lockout rule (3 failures, reset-only clear), 5 min idle expiry, SD command set and limits.
+
+## 11. Addendum 2026-11-03
+Change #8 vs base: in `authenticate()` the PIN is compared BEFORE the old session is revoked (revoking clears the entered PIN; the base order made every PIN fail). No protocol string changed.

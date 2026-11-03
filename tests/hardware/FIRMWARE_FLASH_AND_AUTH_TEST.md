@@ -58,3 +58,8 @@ Run from `C:\mini project\HSS_Complete_Desktop`: `.venv\Scripts\python tests\har
 
 ## Report back
 PASS / FAIL / BLOCKED per row with pasted logs. Claude updates labels: VERIFIED-HARDWARE only for rows with your evidence, and only for the flashed firmware you actually ran.
+
+
+## Addendum 2026-11-03
+- The user flashed a single-file build before this script was run; it showed INCORRECT for a correct PIN because of the auth-order bug (FIRMWARE_ANALYSIS s14), now fixed in the repo sketch. Re-flash a build that contains the fix before running Part 2.
+- For the Arduino IDE use the generated one-file sketch: `powershell firmware\make_single_file.ps1` -> `firmware\single_file\hss_firmware_single\hss_firmware_single.ino` (git-ignored; PINs from `pins_local.h`). In the IDE the board needs the same settings as `firmware/build.ps1` (Generic F4 / Black Pill F401CC, USB CDC generic Serial, and `-DENABLE_HWSERIAL2` or an equivalent Serial2 definition).

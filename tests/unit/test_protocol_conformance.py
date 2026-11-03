@@ -132,3 +132,12 @@ def test_serial_protocol_doc_mentions_every_registry_string():
     assert not missing, f"docs/SERIAL_PROTOCOL.md does not mention: {missing}"
     for s in PROTOCOL_LINES:
         assert s in text, f"firmware line {s!r} not documented"
+
+
+def test_authenticate_compares_pin_before_revoking_session():
+    """Regression (found on first hardware flash): revokeAccessSession() calls clearPIN(), so the PIN must be
+    compared BEFORE it, otherwise every attempt is INCORRECT."""
+    body = SRC[SRC.index("void authenticate()"):SRC.index("// ---------------- Setup")]
+    assert "clearPIN();" in SRC[SRC.index("void revokeAccessSession"):SRC.index("void touchAuthorizedSession")]
+    assert body.index("matchedSlot()") < body.index('revokeAccessSession("SESSION_REVOKED_FOR_REAUTH")')
+    assert body.index("matchedSlot()") < body.index("clearPIN();")

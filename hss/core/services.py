@@ -15,8 +15,9 @@ from .auth_fsm import AuthState
 from .devices import DeviceRow, backend_rows
 
 ROLES = ("USER", "ADMIN")
-_USERNAME = re.compile(r"^[A-Za-z0-9_.@+\-]{3,150}$")
-MIN_PASSWORD = 8
+MAX_USERNAME = 64   # backend AdminUserCreateSerializer.validate_username
+_USERNAME = re.compile(r"^[A-Za-z0-9_.@+\-]{3,64}$")
+MIN_PASSWORD = 10   # backend serializer min_length=10 (+ Django validators decide the rest)
 
 
 class ServiceError(Exception):
@@ -55,7 +56,7 @@ class AccessChange:
 def validate_username(u: str) -> str:
     u = (u or "").strip()
     if not _USERNAME.match(u):
-        raise ValidationError("username", "3-150 characters: letters, digits and _ . @ + -")
+        raise ValidationError("username", "3-64 characters: letters, digits and _ . @ + -")
     return u
 
 
@@ -89,7 +90,7 @@ class AdminService:
     def _client(self):
         c = self.ctl.backend
         if c is None or not c.is_authenticated:
-            raise NotSignedIn("Sign in to the backend first (Backend tab).")
+            raise NotSignedIn("Not signed in to the backend (PIN test mode has no backend access; production needs the password login).")
         return c
 
     def _run(self, action: str, resource: str, fn, details: str = ""):
@@ -124,7 +125,7 @@ class AdminService:
         if not user_id:
             raise ValidationError("user_id", "required")
         c = self._client()
-        fn = (lambda: c.set_user_active(user_id, True)) if active else (lambda: c.disable_user(user_id))
+        fn = lambda: c.set_user_active(user_id, active)   # PATCH /admin/users/{id}/ {is_active} for both directions
         return self._run(action, label or user_id, fn)
 
     def set_user_role(self, user_id: str, role: str, label: str = "") -> dict:

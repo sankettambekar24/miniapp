@@ -5,6 +5,7 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QScrollArea, QStackedWidget, QVBoxLayout, QWidget
 
+from . import theme
 from ..core.preview import Preview
 
 try:  # QtPdf is optional; the frozen build reports whether it was bundled
@@ -25,7 +26,7 @@ class PreviewPane(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self.header = QLabel("")
-        self.header.setStyleSheet("color:#555;")
+        self.header.setStyleSheet(f"color:{theme.MUTED};")
         self.header.setWordWrap(True)
         lay.addWidget(self.header)
         self.stack = QStackedWidget()

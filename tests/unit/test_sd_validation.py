@@ -5,13 +5,13 @@ from hss.core.sd_ops import (MAX_PATH_LEN, SdError, SdErrorCode, check_remote_pa
                              map_device_error, validate_remote_path, validate_upload_name)
 
 
-@pytest.mark.parametrize("name", ["a.txt", "report 1.pdf", "x", "a" * 120, "UPPER.BIN", "con_x.txt", "COM10.txt", "a.b.c"])
+@pytest.mark.parametrize("name", ["a.txt", "x", "UPPER.BIN", "REPORT01.TXT", "con_x.txt", "COM10.txt", "A1_B-2.C"])
 def test_good_upload_names(name):
     assert check_upload_name(name) is None
 
 
 @pytest.mark.parametrize("name", [
-    "", "a/b.txt", "a\b.txt", "c:x.txt", "..", ".", "a..b", "../x", "a" * 121, "bad\x00name", "tab\tname", "new\nline",
+    "report 1.pdf", "a" * 120, "a.b.c", "LONGFILENAME.TXT", "name.html", "", "a/b.txt", "a\b.txt", "c:x.txt", "..", ".", "a..b", "../x", "a" * 121, "bad\x00name", "tab\tname", "new\nline",
     "CON", "con.txt", "PRN", "Aux.log", "NUL.", "COM1", "lpt9.dat", "trail.", "trail ", " lead", "q?.txt", "s*.txt",
     "a|b", 'q"x', "a<b", "a>b", "caf\u00e9.txt", "del\x7f"])
 def test_bad_upload_names(name):

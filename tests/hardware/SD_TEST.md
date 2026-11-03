@@ -46,3 +46,11 @@ Needs the identity file mapping slot 1 = admin, slot 2 = user, and (for the USER
 | R5 | Sign out of the backend. | Permissions cleared; list/download disabled again (fail-closed). |
 | R6 | Sign in with the slot 1 PIN (ADMIN). | Upload/list/download all enabled for every file regardless of grants. |
 Capture evidence under `tests/evidence/hardware/sd/`.
+
+## Update 2026-11-03 (upload fixes) - what a hardware run must now verify
+Status of upload: **MOCK-TESTED only** (fake firmware). Changes since the table above:
+- The host now sends each chunk header, WAITS for `WRITE_CHUNK_READY:<seq>:<len>`, and only then sends the payload (the firmware's own contract, .ino L660-666; before, header+payload went out together). Mock-proven ordering; real-board behaviour UNVERIFIED.
+- Upload names are validated locally as FAT 8.3 root names (classic Arduino `SD.h` cannot open long names: `SD_ERROR:DESTINATION_OPEN_FAILED`). Step 11 above is now enforced in the app: `ABCDEFGHIJKL.TXT` and `long file name with spaces.txt` are rejected locally with nothing sent. Hardware check: confirm an 8.3 name (`REPORT01.TXT`) uploads and (optional, by serial terminal) that a long name really fails on the device.
+- Upload dialog shows name / type / size before sending; refuses existing names (listing) and > 8 MB.
+- Password-login sessions need the keypad PIN unlock too (firmware refuses SD commands otherwise): expected status text "Unlock the device: type your PIN ...".
+Hardware checklist (board required): (1) log in (password or PIN-test), type PIN on keypad; (2) Refresh list; (3) Upload `HELLO.TXT` (small) -> progress -> `SD_WRITE_OK:HELLO.TXT:<n>` in the audit row FILE_UPLOAD success, listing refreshes, Preview shows the text; (4) upload same name again -> "already exists" (local) and, if forced, `SD_ERROR:DESTINATION_EXISTS`; (5) 8 MB+1 file -> local refusal; (6) pull USB mid-upload -> DISCONNECTED message, re-list, note leftover; (7) remove the SD card, upload -> `SD_ERROR:CARD_UNAVAILABLE` -> "SD card is missing"; (8) USER role: Upload button disabled with "Upload is admin-only."; (9) record throughput of the READY handshake on a large file (each 512-byte chunk now costs one more round trip).

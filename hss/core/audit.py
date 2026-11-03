@@ -11,13 +11,28 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+import ipaddress
+from datetime import datetime, timedelta, timezone
 
 from ..backend.redact import redact_text
+from . import clock
 from .localdb import LocalDb
 
 GENESIS = "0" * 64
 _PIN = re.compile(r"(?i)\b(pin|passcode)\b(\s*(?:is|=|:)?\s*)\d{3,}")
+NO_IP = "n/a"
+NO_IP_TIP = ("n/a: the backend returned no IP for this record. Only the backend can see a client IP (as seen by Render's "
+             "proxy, i.e. the public address, never this PC's private LAN IP); this app never invents one.")
+
+
+def valid_ip(value) -> str:
+    """An IP exactly as returned by the backend, or 'n/a'. Never fabricated."""
+    try:
+        return str(ipaddress.ip_address(str(value).strip()))
+    except (ValueError, TypeError):
+        return NO_IP
+
+
 _COLS = ("id", "ts", "username", "user_id", "role", "action", "resource", "device", "status", "details")
 
 
@@ -29,8 +44,8 @@ def redact_audit(text) -> str:
 class AuditFilter:
     user: str = ""
     action: str = ""
-    since: str = ""          # YYYY-MM-DD (UTC), inclusive
-    until: str = ""          # YYYY-MM-DD (UTC), inclusive
+    since: str = ""          # YYYY-MM-DD in IST (as displayed), inclusive
+    until: str = ""          # YYYY-MM-DD in IST (as displayed), inclusive
     status: str = ""         # "", "success", "failure"
     text: str = ""
 
@@ -48,19 +63,35 @@ class AuditRow:
     details: str
     source: str              # "LOCAL" | "BACKEND"
     extra: dict = field(default_factory=dict)
+    ip: str = NO_IP
+
+    @property
+    def display_time(self) -> str:
+        return clock.format_ist(self.ts)
 
     @property
     def date(self) -> str:
-        return self.ts[:10]
+        return self.display_time[:11]
 
     @property
     def time(self) -> str:
-        return self.ts[11:19]
+        return self.display_time[12:]
 
 
 SUCCESS = "success"
 FAILURE = "failure"
 DENIED = "denied"
+
+
+def _ist_day_bounds(since: str, until: str) -> tuple[str | None, str | None]:
+    """IST calendar days -> [lo, hi) as UTC ISO strings (rows are stored in UTC)."""
+    def day(t: str):
+        try:
+            return datetime.strptime(t.strip(), "%Y-%m-%d").replace(tzinfo=clock.IST)
+        except ValueError:
+            return None
+    lo, hi = day(since), day(until)
+    return (clock.to_iso(lo) if lo else None, clock.to_iso(hi + timedelta(days=1)) if hi else None)
 
 
 class AuditStore:
@@ -73,7 +104,7 @@ class AuditStore:
                details: str | None = None, ts: str | None = None) -> int:
         f = [redact_audit(x) if x is not None else "" for x in (username, user_id, role, action, resource, device,
                                                                   status, details)]
-        ts = ts or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        ts = ts or clock.to_iso()  # laptop clock, UTC (the firmware has no RTC)
         with self.db.lock:
             row = self.db.conn.execute("SELECT row_hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
             prev = row[0] if row else GENESIS
@@ -97,12 +128,13 @@ class AuditStore:
         if f.action:
             c.append("action LIKE ?")
             a.append(f"%{f.action}%")
-        if f.since:
+        lo, hi = _ist_day_bounds(f.since, f.until)
+        if lo:
             c.append("ts >= ?")
-            a.append(f.since)
-        if f.until:
+            a.append(lo)
+        if hi:
             c.append("ts < ?")
-            a.append(f.until + "T99")  # '2026-01-02T99' sorts after every time on 2026-01-02
+            a.append(hi)
         if f.status == "success":
             c.append("status = 'success'")
         elif f.status == "failure":
@@ -139,11 +171,13 @@ class AuditStore:
 # ---- backend rows (read-only) ----
 def backend_row(ev: dict) -> AuditRow:
     meta = ev.get("safe_metadata")
-    ts = str(ev.get("occurred_at") or "")
-    return AuditRow(ts.replace(" ", "T"), str(ev.get("actor_username") or ""), "n/a", "n/a",
+    dt = clock.parse_utc(ev.get("occurred_at"))  # backend times are UTC
+    ts = clock.to_iso(dt) if dt else str(ev.get("occurred_at") or "")
+    ip = valid_ip(meta.get("ip")) if isinstance(meta, dict) else NO_IP  # only LOGIN_LOCKED_OUT carries one (source)
+    return AuditRow(ts, str(ev.get("actor_username") or ""), "n/a", "n/a",
                     str(ev.get("event_type") or ""), "n/a", "n/a", str(ev.get("result") or ""),
                     redact_audit(json.dumps(meta, sort_keys=True) if meta else ""), "BACKEND",
-                    {"id": ev.get("id"), "correlation_id": ev.get("correlation_id")})
+                    {"id": ev.get("id"), "correlation_id": ev.get("correlation_id")}, ip)
 
 
 def matches(row: AuditRow, f: AuditFilter) -> bool:
@@ -152,9 +186,8 @@ def matches(row: AuditRow, f: AuditFilter) -> bool:
         return False
     if f.action and f.action.lower() not in row.action.lower():
         return False
-    if f.since and row.ts[:10] < f.since:
-        return False
-    if f.until and row.ts[:10] > f.until:
+    lo, hi = _ist_day_bounds(f.since, f.until)
+    if (lo and row.ts < lo) or (hi and row.ts >= hi):
         return False
     ok = row.status.lower() in ("success", "ok", "succeeded", "allowed")
     if f.status == "success" and not ok:

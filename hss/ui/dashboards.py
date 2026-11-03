@@ -1,7 +1,7 @@
 """Admin and User dashboards. The role comes ONLY from the PIN session identity (local identity file).
 
 Every visible control either performs a real action or is disabled with a tooltip stating why.
-Backend features need the optional runtime sign-in (Backend tab); the backend cannot verify hardware factors
+Backend features need the backend password session; the backend cannot verify hardware factors
 (BLOCKED, docs/BACKEND_ANALYSIS.md s3), so that sign-in is separate from, and never implied by, the PIN session.
 No fabricated data: with no backend sign-in the tables are empty and say so.
 """
@@ -15,13 +15,15 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
                                QLabel, QLineEdit, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
                                QTabWidget, QVBoxLayout, QWidget)
 
-from ..backend import BackendError
+from ..backend.messages import friendly
 from ..controller import AppController
-from ..core.audit import AuditFilter
-from ..core.services import ServiceError, validate_password, validate_role, validate_username
+from ..core.audit import NO_IP_TIP, AuditFilter
+from ..core import clock
+from ..core.services import MAX_USERNAME, MIN_PASSWORD, ServiceError, validate_password, validate_role, validate_username
+from . import theme
 from .async_util import Runner
 
-SIGN_IN_REASON = "Sign in to the backend first (Backend tab)."
+SIGN_IN_REASON = "Requires a signed-in backend session (password login)."
 HW_BLOCKED = ("BLOCKED: the backend cannot verify hardware factors (factor reports are stored verified=false; "
               "complete always returns 409).")
 
@@ -121,7 +123,7 @@ class ListTab(QWidget):
         if note:
             n = QLabel(note)
             n.setWordWrap(True)
-            n.setStyleSheet("color:#555;")
+            n.setStyleSheet(theme.muted_style())
             lay.addWidget(n)
         bar = QHBoxLayout()
         lay.addLayout(bar)
@@ -233,7 +235,7 @@ class ListTab(QWidget):
         self.update_controls()
 
     def _failed(self, exc: Exception) -> None:
-        self.status.setText(f"Error: {type(exc).__name__}: {exc}")
+        self.status.setText(f"Error: {friendly(exc)}")
         self.update_controls()
 
     def _run_action(self, a: Action) -> None:
@@ -251,109 +253,9 @@ class ListTab(QWidget):
         self.ctx.runner.run(fn, ok, self._failed)
 
 
-# ---------------------------------------------------------------- backend sign-in
-class BackendPanel(QWidget):
-    def __init__(self, ctx: Ctx):
-        super().__init__()
-        self.ctx = ctx
-        lay = QVBoxLayout(self)
-        info = QLabel("Optional backend sign-in (credentials are typed here, kept in memory only, never saved). "
-                      "This is NOT hardware verification. " + HW_BLOCKED)
-        info.setWordWrap(True)
-        lay.addWidget(info)
-        form = QFormLayout()
-        lay.addLayout(form)
-        self.url = QLineEdit(ctx.ctl.config.backend_url or "")
-        self.url.setPlaceholderText("https://...")
-        self.user = QLineEdit()
-        self.pw = QLineEdit()
-        self.pw.setEchoMode(QLineEdit.Password)
-        form.addRow("Backend URL", self.url)
-        form.addRow("Username", self.user)
-        form.addRow("Password", self.pw)
-        row = QHBoxLayout()
-        self.check_btn, self.in_btn, self.out_btn = QPushButton("Check health"), QPushButton("Sign in"), QPushButton("Sign out")
-        for b in (self.check_btn, self.in_btn, self.out_btn):
-            row.addWidget(b)
-        row.addStretch(1)
-        lay.addLayout(row)
-        self.status = QLabel("Not signed in (local-only mode).")
-        self.status.setWordWrap(True)
-        lay.addWidget(self.status)
-        lay.addStretch(1)
-        self.check_btn.clicked.connect(self._health)
-        self.in_btn.clicked.connect(self._login)
-        self.out_btn.clicked.connect(self._logout)
-        ctx.wait_message.connect(self.status.setText)
-        self.update_controls()
-
-    def _client(self):
-        try:
-            return self.ctx.ctl.ensure_backend(self.url.text().strip() or None)
-        except ValueError as exc:
-            self.status.setText(f"Invalid URL: {exc}")
-            return None
-
-    def update_controls(self) -> None:
-        si = self.ctx.signed_in
-        self.in_btn.setEnabled(not si)
-        self.in_btn.setToolTip("Already signed in." if si else "")
-        self.out_btn.setEnabled(si)
-        self.out_btn.setToolTip("" if si else "Not signed in.")
-        if si:
-            u = self.ctx.client.current_user or {}
-            self.status.setText(f"Signed in to the backend as {u.get('username')} ({u.get('role')}).")
-
-    def _health(self) -> None:
-        c = self._client()
-        if not c:
-            self.status.setText(self.status.text() if "Invalid" in self.status.text() else "Enter the backend URL first.")
-            return
-        self.status.setText("Checking health (a sleeping server can take up to a minute) ...")
-        self.ctx.runner.run(lambda: (c.health_live(), c.health_ready()),
-                            lambda r: self.status.setText(f"Backend reachable: live={r[0].get('status')} ready={r[1].get('status')}"),
-                            lambda e: self.status.setText(f"Health check failed: {type(e).__name__}: {e}"))
-
-    def _login(self) -> None:
-        c = self._client()
-        if not c:
-            self.status.setText(self.status.text() if "Invalid" in self.status.text() else "Enter the backend URL first.")
-            return
-        user, pw = self.user.text().strip(), self.pw.text()
-        self.pw.clear()
-        if not user or not pw:
-            self.status.setText("Username and password are required.")
-            return
-        self.status.setText("Signing in ...")
-
-        def failed(e):
-            self.status.setText(f"Sign-in failed: {type(e).__name__}: {e}")
-
-        def ok(_u):
-            self.ctx.backend_changed.emit()
-            if self.ctx.ctl.session.identity and self.ctx.ctl.session.identity.role == "user":
-                self.ctx.load_grants(self.status.setText)  # USER SD access depends on these permissions
-
-        self.ctx.runner.run(lambda: c.login(user, pw), ok, failed)
-
-    def _logout(self) -> None:
-        c = self.ctx.client
-        if not c:
-            return
-        self.status.setText("Signing out ...")
-
-        def done(*_):
-            self.ctx.ctl.backend = None
-            self.ctx.ctl.grants = None
-            self.status.setText("Signed out (local tokens cleared).")
-            self.ctx.backend_changed.emit()
-
-        self.ctx.runner.run(c.logout, done, done)  # tokens are cleared locally even if the call fails
-
-
 # ---------------------------------------------------------------- tab factories
 def _show_error(parent, exc: Exception) -> None:
-    QMessageBox.warning(parent, "Hybrid Secure Storage", f"{type(exc).__name__}: {exc}")
+    QMessageBox.warning(parent, "Hybrid Secure Storage", friendly(exc))
 
 
 def _users_tab(ctx: Ctx) -> QWidget:
@@ -361,8 +263,9 @@ def _users_tab(ctx: Ctx) -> QWidget:
     svc = ctx.ctl.admin
 
     def create(tab, _row):
-        v = ask_fields(tab, "Create user (LIVE backend write)",
-                       [("u", "Username", "text"), ("p", "Password", "password"), ("r", "Role", "choice", ["USER", "ADMIN"])])
+        v = ask_fields(tab, "Create user",
+                       [("u", f"Username (max {MAX_USERNAME})", "text"), ("p", f"Password (min {MIN_PASSWORD})", "password"),
+                        ("r", "Role (the backend allows only one ADMIN)", "choice", ["USER", "ADMIN"])])
         if not v:
             return
         try:
@@ -372,7 +275,7 @@ def _users_tab(ctx: Ctx) -> QWidget:
         except ServiceError as exc:
             _show_error(tab, exc)
             return
-        tab.do(lambda: svc.create_user(v["u"], v["p"], v["r"]), "User created.")
+        tab.do(lambda: svc.create_user(v["u"], v["p"], v["r"]), f"User {v['u']} created.")
 
     def edit(tab, row):
         if not row:
@@ -402,12 +305,12 @@ def _users_tab(ctx: Ctx) -> QWidget:
 
     w = QWidget()
     lay = QVBoxLayout(w)
-    if ctx.ctl.config.test_mode:
+    if ctx.ctl.config.test_mode:  # PIN test mode only; never shown in production
         box = QLabel("LOCAL TEST identities (read-only, from test_identities.json; PIN slots, not backend users):\n" +
                      "\n".join(f"  slot {s}: {n} ({r})" for s, n, r in svc.local_test_identities()))
-        box.setStyleSheet("background:#fff3e0;border:1px solid #e65100;padding:6px;")
+        box.setStyleSheet(theme.banner_style("warning"))
         lay.addWidget(box)
-    lay.addWidget(QLabel("Backend users (needs backend sign-in; writes are LIVE):"))
+    lay.addWidget(QLabel("Backend users (changes are written to the backend immediately):"))
     tab = ListTab(ctx, lambda p, f: svc.list_users(p),
                   [Action("Create user...", create, needs_row=False), Action("Edit...", edit),
                    Action("Disable (no delete)", disable), Action("Enable", enable)])
@@ -419,7 +322,7 @@ def _users_tab(ctx: Ctx) -> QWidget:
 
 class DevicesTab(QWidget):
     """Admin > Devices: backend registry + LOCAL USB history (never deleted), each row labelled with its source."""
-    HEADERS = ("Device ID", "Name", "Associated user", "Type", "IP", "First seen", "Last seen", "Status", "Source")
+    HEADERS = ("Device ID", "Name", "Associated user", "Type", "IP", "First seen (IST)", "Last seen (IST)", "Status", "Source")
 
     def __init__(self, ctx: Ctx):
         super().__init__()
@@ -447,17 +350,21 @@ class DevicesTab(QWidget):
 
     def _loaded(self, res) -> None:
         rows, note = res
-        self.note.setText(note or "LOCAL rows come from this PC's USB history; BACKEND rows from the device registry.")
+        self.note.setText(note or "LOCAL rows: this PC's USB history (PC clock; the firmware has no RTC). BACKEND rows: device registry.")
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
-            for j, v in enumerate((r.device_id, r.name, r.user, r.dev_type, r.ip, r.first_seen, r.last_seen, r.status, r.source)):
-                self.table.setItem(i, j, QTableWidgetItem(str(v)))
+            for j, v in enumerate((r.device_id, r.name, r.user, r.dev_type, r.ip, clock.format_ist(r.first_seen),
+                                   clock.format_ist(r.last_seen), r.status, r.source)):
+                it = QTableWidgetItem(str(v))
+                if j == 4 and r.ip == "n/a":
+                    it.setToolTip(NO_IP_TIP)
+                self.table.setItem(i, j, it)
         self.table.resizeColumnsToContents()
 
 
 class AuditTab(QWidget):
     """Admin > Audit Log: LOCAL append-only SQLite rows merged with backend audit events (read-only GET)."""
-    HEADERS = ("Date", "Time", "Username", "User ID", "Role", "Action", "Resource", "Device", "Status", "Details", "Source")
+    HEADERS = ("Date (IST)", "Time (IST)", "Username", "User ID", "Role", "Action", "Resource", "Device", "IP", "Status", "Details", "Source")
 
     def __init__(self, ctx: Ctx):
         super().__init__()
@@ -467,8 +374,8 @@ class AuditTab(QWidget):
         lay.addLayout(f)
         self.user, self.action, self.text = QLineEdit(), QLineEdit(), QLineEdit()
         self.since, self.until = QLineEdit(), QLineEdit()
-        for w, ph in ((self.user, "User"), (self.action, "Action"), (self.since, "From YYYY-MM-DD"),
-                      (self.until, "To YYYY-MM-DD"), (self.text, "Search text")):
+        for w, ph in ((self.user, "User"), (self.action, "Action"), (self.since, "From YYYY-MM-DD (IST)"),
+                      (self.until, "To YYYY-MM-DD (IST)"), (self.text, "Search text")):
             w.setPlaceholderText(ph)
             w.returnPressed.connect(self.search)
             f.addWidget(w)
@@ -490,8 +397,8 @@ class AuditTab(QWidget):
             bar.addWidget(w)
         bar.addStretch(1)
         bar.addWidget(self.verify_btn)
-        self.note = QLabel("LOCAL rows are an append-only hash-chained trail on this PC: NOT tamper-proof against "
-                           "someone with file access. BACKEND rows are read-only.")
+        self.note = QLabel("Times are shown in IST. LOCAL rows: append-only hash-chained trail on this PC, stamped with the PC "
+                           "clock (the firmware has no RTC); NOT tamper-proof against someone with file access. BACKEND rows are read-only.")
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
         self.table = QTableWidget(0, len(self.HEADERS))
@@ -527,9 +434,12 @@ class AuditTab(QWidget):
         self.next_btn.setEnabled(self.page * 50 < total or any(r.source == "BACKEND" for r in rows))
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
-            vals = (r.date, r.time, r.username, r.user_id, r.role, r.action, r.resource, r.device, r.status, r.details, r.source)
+            vals = (r.date, r.time, r.username, r.user_id, r.role, r.action, r.resource, r.device, r.ip, r.status, r.details, r.source)
             for j, v in enumerate(vals):
-                self.table.setItem(i, j, QTableWidgetItem(str(v)))
+                it = QTableWidgetItem(str(v))
+                if j == 8 and r.ip == "n/a":
+                    it.setToolTip(NO_IP_TIP)
+                self.table.setItem(i, j, it)
         self.table.resizeColumnsToContents()
 
     def _verify(self) -> None:
@@ -555,7 +465,6 @@ def build_dashboard(ctx: Ctx, role: str, sd_page_factory: Callable[[Ctx], QWidge
     admin = role == "admin"
     tabs = QTabWidget()
     tabs.setObjectName("adminDashboard" if admin else "userDashboard")
-    panel = BackendPanel(ctx)
     backend_tabs: list = []
     if admin:
         users = _users_tab(ctx)
@@ -569,10 +478,8 @@ def build_dashboard(ctx: Ctx, role: str, sd_page_factory: Callable[[Ctx], QWidge
         pol = _policies_tab(ctx)
         tabs.addTab(pol, "Offline policies")
         backend_tabs.append(pol)
-    tabs.addTab(panel, "Backend")
 
     def on_change() -> None:
-        panel.update_controls()
         for t in backend_tabs:
             t.clear()
         if not ctx.signed_in:
@@ -584,5 +491,5 @@ def build_dashboard(ctx: Ctx, role: str, sd_page_factory: Callable[[Ctx], QWidge
     ctx.backend_changed.connect(on_change)
     tabs.on_change = on_change  # type: ignore[attr-defined]
     for t in backend_tabs:
-        t.clear()
+        t.reload() if ctx.signed_in else t.clear()
     return tabs

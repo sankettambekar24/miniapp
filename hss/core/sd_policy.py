@@ -123,7 +123,7 @@ class SdPolicy:
             return None
         if r == "user":
             return None if self._grants() is not None else (
-                "Permissions are not loaded: sign in to the backend (Backend tab) and load permissions.")
+                "Permissions are not loaded: permissions are loaded automatically after the backend sign-in.")
         return "No permitted role."
 
     def can(self, path: str, permission: str) -> bool:

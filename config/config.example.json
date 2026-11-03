@@ -1,10 +1,14 @@
 {
-  "_comment": "Default config (created on first run). mode: pin_test = PIN-ONLY TEST MODE; production = fail-closed. manual_port is a fallback only (still verified with VERSION).",
-  "mode": "pin_test",
-  "usb_ids": [{"vid": "0483", "pid": "5740"}],
+  "_comment": "HSS config (optional). mode: production (default, backend password login) or pin_test (explicit PIN-only TEST mode with red banner).",
+  "mode": "production",
+  "usb_ids": [
+    {
+      "vid": "0483",
+      "pid": "5740"
+    }
+  ],
   "description_contains": [],
   "probe": true,
   "manual_port": null,
-  "baud": 115200,
-  "backend_url": null
+  "baud": 115200
 }

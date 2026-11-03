@@ -3,6 +3,7 @@ Rescan, and an optional manual port override (fallback only; the port is still v
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
+from . import theme
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
@@ -49,7 +50,7 @@ class DiagnosticsPage(QWidget):
             row.addWidget(w)
         lay.addLayout(row)
         self.hint = QLabel(f"Config: {paths.config_path()}\nLog: {paths.logs_dir() / 'hss.log'}")
-        self.hint.setStyleSheet("color:#555;")
+        self.hint.setStyleSheet(f"color:{theme.MUTED};")
         self.hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(self.hint)
         self._timer = QTimer(self)

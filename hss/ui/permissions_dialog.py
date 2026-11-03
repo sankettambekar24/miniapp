@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout)
 
+from . import theme
 from ..core.services import AccessChange
 
 
@@ -30,7 +31,7 @@ class PermissionsDialog(QDialog):
         note = QLabel("Read = backend LIST+READ grants (live write on Apply). Download = LOCAL flag, enforced only by this "
                       "app on this PC (the backend has no download grant; its file-content endpoint is BLOCKED/503).")
         note.setWordWrap(True)
-        note.setStyleSheet("color:#555;")
+        note.setStyleSheet(f"color:{theme.MUTED};")
         lay.addWidget(note)
         bar = QHBoxLayout()
         self.create_btn = QPushButton("Create backend record for this file")

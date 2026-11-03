@@ -192,6 +192,12 @@ def check_upload_name(name: str) -> str | None:
         return "leading space or trailing dot/space"
     if name.split(".")[0].rstrip(" ").upper() in _WIN_RESERVED:
         return "Windows-reserved device name"
+    # The firmware uses the classic Arduino SD library: FAT 8.3 short names only. A longer name makes SD.open fail
+    # (SD_ERROR:DESTINATION_OPEN_FAILED) after the transfer was already negotiated.
+    from .sd_policy import check_83_safe
+    why = check_83_safe(name)
+    if why:
+        return f"not an 8.3 short name ({why}); example: REPORT01.TXT"
     return None
 
 
@@ -676,9 +682,15 @@ class SdService:
                 chunk = data[sent:sent + MAX_CHUNK]
                 awaiting_header = False
                 io.write(f"WRITE_CHUNK:{seq}:{len(chunk)}\n".encode("ascii"))
+                io.flush()
+                # Firmware contract (.ino L660-666): the host must NOT send payload bytes before WRITE_CHUNK_READY.
+                # (Sending header+payload together, as before, can overrun the device's USB receive buffer.)
+                rdy = self._expect(io, wid, ("WRITE_CHUNK_READY:",), self.t.ready)
+                if rdy != f"WRITE_CHUNK_READY:{seq}:{len(chunk)}":
+                    raise SdError(SdErrorCode.PROTOCOL, f"unexpected chunk ready {rdy!r}")
                 io.write(chunk)
                 io.flush()
-                ack = self._expect(io, wid, ("WRITE_CHUNK_OK:",), self.t.ack)
+                ack =self._expect(io, wid, ("WRITE_CHUNK_OK:",), self.t.ack)
                 if ack != f"WRITE_CHUNK_OK:{seq}:{len(chunk)}":
                     raise SdError(SdErrorCode.PROTOCOL, f"unexpected chunk ack {ack!r}")
                 awaiting_header = True
@@ -746,3 +758,36 @@ class SdService:
         except (SdError, TxTimeout):
             return None
         return name.casefold() in {p.casefold() for p in listing.paths}
+
+
+# ---- upload planning (pure; used by the upload dialog and tests) ---------------------------------------------------
+def suggest_83_name(file_name: str) -> str:
+    """Best-effort FAT 8.3 short name for `file_name` (upper-case, invalid chars dropped). User can edit it."""
+    import re
+    base, dot, ext = file_name.rpartition(".")
+    if not dot:
+        base, ext = file_name, ""
+    clean = lambda t, n: re.sub(r"[^A-Za-z0-9_\-]", "", t).upper()[:n]  # noqa: E731
+    b, e = clean(base, 8), clean(ext, 3)
+    b = b or "FILE"
+    return f"{b}.{e}" if e else b
+
+
+def validate_upload_plan(local_path, device_name: str, existing: list[str] | None = None) -> str | None:
+    """Reason the upload must not start, else None. Mirrors firmware limits: root-level 8.3 name (L634 + SD library),
+    <= 8 MiB (L635), no overwrite (L637). Nothing is sent to the device by this function."""
+    why = check_upload_name(device_name)
+    if why:
+        return f"Name '{device_name}' cannot be used: {why}"
+    try:
+        p = Path(local_path)
+        if not p.is_file():
+            return "The selected path is not a readable file."
+        size = p.stat().st_size
+    except OSError as exc:
+        return f"Cannot read the file ({type(exc).__name__})."
+    if size > MAX_UPLOAD_BYTES:
+        return f"File is {size} bytes; the firmware limit is {MAX_UPLOAD_BYTES} bytes (8 MB)."
+    if existing and device_name.casefold() in {e.casefold() for e in existing}:
+        return f"'{device_name}' already exists on the SD card (the firmware never overwrites). Choose another name."
+    return None

@@ -11,6 +11,7 @@ class Identity:
     slot: int
     name: str
     role: str  # "admin" | "user"
+    user_id: str | None = None  # backend user id (password login); None for PIN test identities
 
 
 class SessionStore:

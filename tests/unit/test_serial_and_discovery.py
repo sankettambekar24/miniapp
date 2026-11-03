@@ -202,7 +202,7 @@ def test_example_templates_are_valid_and_contain_no_real_data():
     root = Path(__file__).resolve().parents[2] / "config"
     r = IdentityResolver.load(root / "test_identities.example.json")
     assert r.resolve(1).role == "admin" and r.resolve(2).role == "user"
-    assert load_config(root / "config.example.json").test_mode
+    assert not load_config(root / "config.example.json").test_mode  # shipped default = production
 
 
 def test_config_defaults_to_production_and_fails_closed(tmp_path):

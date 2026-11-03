@@ -75,3 +75,12 @@
 40. **Merged audit page size.** One page = one LOCAL page (50, SQL-filtered) + the matching backend page (<=50, client-side filtered because the backend only filters by event_type), merged newest first.
 41. **Admin role check lives in the controller layer** (`AdminService`), not in widgets; USER identities get typed PermissionDenied and the refusal is audited. No new dependencies (sqlite3, zipfile, xml.etree are stdlib; QtPdf ships with PySide6 and is un-excluded in hss.spec).
 42. **FSM accepts a device-verified PIN without clicking Start and after a failed attempt** (the PIN is typed on the device; the device is the source of truth). Probe fallback and manual port override added to port detection (verified with VERSION -> HSS_FW:).
+
+43. **Default mode is backend password login (2026-11-03).** `AppConfig` default = production; first run creates no config and no test identities; the old auto-created pin_test config is migrated (backed up) so test mode is never silent. Production never reads `test_identities.json`.
+44. **Password sessions and the device.** Identity/role come only from the backend (`/auth/me/`). The keypad PIN in production only sets `device_pin_verified` (SD unlock), never an identity. USB unplug does not end a password session.
+45. **Backend URL is a constant** (`hss/config.py BACKEND_URL`), no UI to change it; a `backend_url` key in config.json remains as a developer override (HTTPS enforced by the client).
+46. **Enable and disable both use PATCH** `/admin/users/{id}/ {is_active}` (the approved live scope); the POST `/disable/` route is no longer used by the app.
+47. **Create-user rules mirror the backend serializer:** username <= 64, password >= 10 (Django validators still decide), role USER or ADMIN (backend rejects a second ADMIN; shown as a friendly message).
+48. **Upload follows the firmware contract:** wait for `WRITE_CHUNK_READY` before payload; local 8.3 root-name validation; suggestion helper; dialog shows name/type/size.
+49. **Time:** all timestamps through `hss/core/clock.py`; UTC ISO in storage, IST on screen; no tzdata dependency (fixed +05:30 fallback, exact for IST).
+50. **IP:** never invented; only a valid IP literal returned by the backend is shown, else "n/a".

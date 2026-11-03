@@ -35,3 +35,6 @@ Flashed a single-file Stage 3 build: correct PIN gave INCORRECT. Cause (code-der
 
 ## Update 2026-11-03 (speed mode)
 Implemented and MOCK-TESTED: SD file reader (preview), per-file permissions in the SD Card page, admin Users / Devices / Audit Log, local SQLite (audit hash chain, device history, download flags), admin-only service layer. Removed: Overview, Demo mode, Device Log. NOT verified on hardware or live backend. See FEATURE_PARITY.md section 5 for enforcement labels. Live writes still needing approval to verify user management: see TEST_REPORT.md.
+
+## Update 2026-11-03 (second speed run)
+Default build = backend password login (fail-closed), internal backend with health indicator, Backend tab removed, working admin user creation (mock-tested; live script ready), dark theme with contrast test, upload fixed (READY handshake + 8.3 + dialog; mock-tested only), IST timestamps, IP shown only when the backend supplies it. Hardware and live-user-lifecycle runs still pending the user (see TEST_REPORT.md).

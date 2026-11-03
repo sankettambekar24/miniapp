@@ -24,12 +24,21 @@ def test_test_mode_banner_and_title(app):
     assert "PIN-ONLY TEST MODE" in w.mode_label.text()
 
 
-def test_production_mode_fail_closed_ui(app):
+def test_production_mode_ui_is_distinct_and_password_based(app):
     rig = Rig([ST], mode=MODE_PRODUCTION)
     w = MainWindow(rig.ctl)
-    assert w.banner.isHidden()
-    assert w.mode_title.text() == "Hardware verification not available"
-    assert not w.start_btn.isEnabled() and w.start_btn.toolTip()
+    assert w.banner.isHidden() and not w.mode_banner.isHidden()           # blue production banner, no red test banner
+    assert "PRODUCTION" in w.mode_banner.text()
+    assert w.mode_title.text() == "Password login (no hardware factor)"
+    assert not w.login_box.isHidden() and w.start_btn.isHidden() and w.factor_box.isHidden()
+    assert not w.signout_btn.isEnabled() and w.signout_btn.toolTip()
+    assert "[PIN TEST MODE]" not in w.windowTitle()
+
+
+def test_test_mode_ui_stays_red_and_has_no_password_form(app):
+    w = MainWindow(Rig([ST]).ctl)
+    assert not w.banner.isHidden() and w.mode_banner.isHidden() and w.login_box.isHidden()
+    assert "[PIN TEST MODE]" in w.windowTitle()
 
 
 def test_factors_are_disabled_stubs(app):
@@ -76,17 +85,24 @@ def test_diagnostics_page_lists_ports_and_rescan(app):
     assert rig.cfg.manual_port == "COM15"
 
 
-def test_first_run_creates_default_test_mode_files(tmp_path, monkeypatch):
-    import json
-    from hss import paths
+def test_first_run_defaults_to_production_and_never_creates_test_mode(tmp_path, monkeypatch):
     from hss.config import load_config
-    from hss.core.identity import IdentityResolver
     from hss.firstrun import ensure_first_run
     monkeypatch.setenv("HSS_DATA_DIR", str(tmp_path))
     made = ensure_first_run()
-    assert "config.json" in made and "test_identities.json" in made
-    assert load_config().test_mode
-    r = IdentityResolver.load()
-    assert r.resolve(1).role == "admin" and r.resolve(2).role == "user"
-    (tmp_path / "config.json").write_text('{"mode": "production"}')
-    assert ensure_first_run() == [] and not load_config().test_mode  # never overwrites
+    assert "config.json" not in made and "test_identities.json" not in made
+    assert not load_config().test_mode
+    assert not (tmp_path / "test_identities.json").exists()
+
+
+def test_first_run_migrates_the_old_silently_created_test_config(tmp_path, monkeypatch):
+    from hss.config import load_config
+    from hss.firstrun import ensure_first_run
+    monkeypatch.setenv("HSS_DATA_DIR", str(tmp_path))
+    (tmp_path / "config.json").write_text('{"_comment": "Default config (created on first run). x", "mode": "pin_test"}')
+    ensure_first_run()
+    assert not load_config().test_mode and (tmp_path / "config.json.auto-test-mode.bak").exists()
+    # a deliberate config (no auto marker) is untouched and then gets the identity template
+    (tmp_path / "config.json").write_text('{"mode": "pin_test"}')
+    made = ensure_first_run()
+    assert load_config().test_mode and "test_identities.json" in made

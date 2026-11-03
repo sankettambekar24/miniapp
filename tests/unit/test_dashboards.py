@@ -33,7 +33,7 @@ def test_admin_dashboard_tabs_and_role_from_identity_only(app):
     w = MainWindow(rig.ctl)
     login(rig, w, 1)
     assert w.stack.currentIndex() == PAGE_ADMIN and w.dash.objectName() == "adminDashboard"
-    assert tab_titles(w.dash) == ["Users", "SD Card", "Devices", "Audit Log", "Offline policies", "Backend"]
+    assert tab_titles(w.dash) == ["Users", "SD Card", "Devices", "Audit Log", "Offline policies"]
     assert w.dash.currentIndex() == 0  # lands on Users
 
 
@@ -43,7 +43,7 @@ def test_user_dashboard_has_no_admin_tabs(app):
     login(rig, w, 2)
     assert w.stack.currentIndex() == PAGE_USER and w.dash.objectName() == "userDashboard"
     titles = tab_titles(w.dash)
-    assert titles == ["SD Card", "Backend"] and w.dash.currentIndex() == 0  # lands on SD Card
+    assert titles == ["SD Card"] and w.dash.currentIndex() == 0  # lands on SD Card
     assert "Overview" not in titles
 
 
@@ -108,7 +108,7 @@ def test_backend_state_wiped_on_lock(app):
 
 def test_ensure_backend_rejects_insecure_url_and_none_without_url(app):
     rig = Rig([ST])
-    assert rig.ctl.ensure_backend() is None
+    assert rig.ctl.ensure_backend().base_url == "https://mini-backend-z8dr.onrender.com"   # built in
     with pytest.raises(ValueError):
         rig.ctl.ensure_backend("http://example.com")
     assert rig.ctl.ensure_backend("https://example.com").base_url == "https://example.com"

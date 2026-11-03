@@ -134,7 +134,7 @@ def test_validation_typed_errors_and_password_never_audited():
     assert all("Sup3r-secret-pw" not in (r.details + r.resource) for r in rows)
     with pytest.raises(ValidationError):
         validate_username("bad name!")
-    assert validate_password("12345678x", "someone")
+    assert validate_password("123456789x", "someone")
 
 
 def test_apply_file_access_grants_list_and_read_and_local_download_flag():

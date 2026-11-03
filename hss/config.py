@@ -1,4 +1,4 @@
-"""App configuration. Fail-closed: anything other than mode == "pin_test" is production."""
+"""App configuration. Fail-closed: anything other than mode == "pin_test" is production (backend password login)."""
 from __future__ import annotations
 
 import json
@@ -7,6 +7,8 @@ from pathlib import Path
 
 from . import paths
 
+# Built into the client layer (a public URL, not a secret). No URL/config screen exists in the app.
+BACKEND_URL = "https://mini-backend-z8dr.onrender.com"
 MODE_PRODUCTION = "production"
 MODE_PIN_TEST = "pin_test"
 
@@ -30,7 +32,7 @@ class AppConfig:
     baud: int = 115200  # firmware .ino L995 (EXTERNAL-INO)
     scan_interval: float = 1.0
     post_open_delay: float = 0.5  # old app used 2 s (face_bridge.py:299); tunable, UNVERIFIED
-    backend_url: str | None = None
+    backend_url: str | None = BACKEND_URL
     load_warning: str | None = None
 
     @property
@@ -65,7 +67,8 @@ def load_config(path: Path | None = None) -> AppConfig:
         cfg.baud = int(raw.get("baud", cfg.baud))
         cfg.scan_interval = float(raw.get("scan_interval", cfg.scan_interval))
         cfg.post_open_delay = float(raw.get("post_open_delay", cfg.post_open_delay))
-        cfg.backend_url = raw.get("backend_url") or None
+        if raw.get("backend_url"):  # optional override for development only; validated (https) by BackendClient
+            cfg.backend_url = str(raw["backend_url"])
     except Exception as exc:  # invalid config => production defaults (fail-closed)
         return AppConfig(load_warning=f"config ignored ({type(exc).__name__}): using production defaults")
     return cfg

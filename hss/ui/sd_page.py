@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QProgressBar,
+from PySide6.QtWidgets import (QAbstractItemView, QDialog, QFileDialog, QHBoxLayout, QLabel, QProgressBar,
                                QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..core.audit import DENIED, FAILURE, SUCCESS
@@ -17,6 +17,7 @@ from ..core.auth_fsm import AuthState
 from ..core.preview import PREVIEW_CAP, build_preview
 from ..core.sd_ops import SdError, SdErrorCode, SdResult
 from .preview_pane import PreviewPane
+from .upload_dialog import UploadDialog
 
 FRIENDLY = {
     SdErrorCode.FORBIDDEN: "Not allowed by the role/permission policy.",
@@ -40,12 +41,21 @@ FRIENDLY = {
 }
 
 
+DEVICE_TEXT = {
+    "CARD_UNAVAILABLE": "The SD card is missing or not readable: insert/re-seat the card and retry.",
+    "DESTINATION_OPEN_FAILED": "The device could not create the file (usually a non 8.3 name or a full/read-only card).",
+    "AUTH_REQUIRED": "The device is locked: type your PIN on the device keypad first.",
+}
+
+
 def describe(err: SdError) -> str:
     text = f"{FRIENDLY.get(err.code, err.code.value)} [{err.code.value}]"
     if err.device_code:
         text += f" (device: {err.device_code})"
     if err.message and err.message != err.code.value:
         text += f" - {err.message}"
+    if err.device_code in DEVICE_TEXT:
+        text += " " + DEVICE_TEXT[err.device_code]
     if err.partial_left is True:
         text += " A partial file REMAINS on the card (visible in the list)."
     elif err.partial_left is False:
@@ -131,7 +141,9 @@ class SdPage(QWidget):
         if not self.ctl.manager.connected:
             return "Device not connected."
         if self.ctl.fsm.state is not AuthState.SESSION_ACTIVE:
-            return "Requires an active PIN session."
+            return "Requires an active session."
+        if not self.ctl.fsm.sd_ready:
+            return "Unlock the device: type your PIN on the device keypad (the firmware refuses SD commands otherwise)."
         if self.busy:
             return "An SD operation is running."
         return None
@@ -167,13 +179,13 @@ class SdPage(QWidget):
         self.btn_perms.setVisible(admin)
         self.btn_perms.setEnabled(can_perm)
         self.btn_perms.setToolTip("" if can_perm else
-                                  ("Select a file first." if path is None else "Sign in to the backend first (Backend tab)."))
+                                  ("Select a file first." if path is None else "Requires a signed-in backend session."))
         self.btn_cancel.setEnabled(self.busy)
         self.btn_cancel.setToolTip("" if self.busy else "Nothing to cancel.")
         if user:
             have = self.ctl.grants is not None
             self.perm_label.setText(
-                "Your permissions load automatically from the backend after you sign in (Backend tab). " +
+                "Your permissions load automatically from the backend after the backend sign-in. " +
                 (f"Loaded for {len(self.ctl.grants)} file(s). Read = preview; Download needs Read plus admin approval."
                  if have else "Not loaded yet: nothing can be listed, previewed or downloaded."))
         else:
@@ -242,18 +254,18 @@ class SdPage(QWidget):
         self.sd.download(path, dest, lambda d, t: self.br.progress.emit(d, t), lambda r: self.br.done.emit("download", r))
 
     def _upload(self) -> None:
+        """Admin only. The service re-checks the role; this dialog only shows name/type/size and validates first."""
         src, _ = QFileDialog.getOpenFileName(self, "Choose a file to upload to the SD card")
         if not src:
             return
-        name, ok = QInputDialog.getText(self, "Upload", "File name on the SD card (root level, no folders):",
-                                        text=Path(src).name)
-        if not ok or not name.strip():
+        dlg = UploadDialog(src, list(self.paths), self)
+        if dlg.exec() != QDialog.Accepted:
             return
-        self._cur = name.strip()
-        self._start(f"Uploading {name.strip()} ...")
+        name = dlg.device_name()
+        self._cur = name
+        self._start(f"Uploading {name} ...")
         self._show_progress()
-        self.sd.upload(src, name.strip(), lambda d, t: self.br.progress.emit(d, t),
-                       lambda r: self.br.done.emit("upload", r))
+        self.sd.upload(src, name, lambda d, t: self.br.progress.emit(d, t), lambda r: self.br.done.emit("upload", r))
 
     # ---- results (GUI thread) ----
     def _progress(self, done: int, total: int) -> None:

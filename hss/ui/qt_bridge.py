@@ -9,11 +9,13 @@ from ..controller import AppController
 class QtBridge(QObject):
     auth_changed = Signal()
     usb_changed = Signal(str)
+    backend_status = Signal(str, str)
 
     def __init__(self, controller: AppController):
         super().__init__()
         self.controller = controller
         controller.fsm.listeners.append(lambda _fsm: self.auth_changed.emit())
+        controller.on_backend_status.append(lambda st, detail: self.backend_status.emit(st, detail))
         m = controller.manager
         m.on_connected.append(lambda gen, port: self.usb_changed.emit(f"USB: connected ({port.device})"))
         m.on_disconnected.append(lambda reason: self.usb_changed.emit(f"USB: disconnected ({reason})"))

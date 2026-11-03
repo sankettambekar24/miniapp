@@ -106,25 +106,10 @@ def test_usb_unplug_does_not_end_a_password_session_but_drops_device_unlock():
     rig.connect()
     rig.ctl.backend_login("root", PW)
     rig.device_says("AUTH_PIN_VERIFIED:1")
-    assert rig.ctl.fsm.device_pin_verified and rig.ctl.fsm.sd_ready
+    assert rig.ctl.fsm.device_pin_verified
     rig.unplug()
     assert rig.ctl.fsm.state is AuthState.SESSION_ACTIVE and not rig.ctl.fsm.device_pin_verified
     assert rig.ctl.backend is not None and rig.ctl.session.backend_token == "A.tok.en"
-
-
-def test_sd_needs_device_pin_unlock_in_production_and_sends_nothing_without_it():
-    rig = prod_rig()
-    rig.connect()
-    rig.ctl.backend_login("root", PW)
-    n = len(rig.ser.written)
-    out = []
-    rig.ctl.sd.list_files(out.append)
-    rig.pump(2)
-    assert out and out[0].error.code is SdErrorCode.NOT_AUTHENTICATED and len(rig.ser.written) == n
-    rig.device_says("AUTH_PIN_VERIFIED:2")
-    assert rig.ctl.fsm.sd_ready
-    rig.device_says("SESSION_ENDED")                     # keypad C
-    assert not rig.ctl.fsm.sd_ready and rig.ctl.fsm.state is AuthState.SESSION_ACTIVE
 
 
 def test_sign_out_clears_everything_and_logs_out_backend():

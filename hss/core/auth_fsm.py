@@ -68,10 +68,9 @@ class AuthFSM:
 
     @property
     def sd_ready(self) -> bool:
-        """May SD operations be sent? Test mode: PIN session. Production: backend session AND device PIN unlock."""
-        if self._cfg.test_mode:
-            return self.state is AuthState.SESSION_ACTIVE
-        return self.state is AuthState.SESSION_ACTIVE and self.device_pin_verified
+        """SD commands may be sent whenever a session is active. We deliberately do NOT guess whether the device keypad
+        is unlocked: the firmware answers SD_ERROR:AUTH_REQUIRED itself and the UI shows that real error."""
+        return self.state is AuthState.SESSION_ACTIVE
 
     def _notify(self) -> None:
         for cb in list(self.listeners):

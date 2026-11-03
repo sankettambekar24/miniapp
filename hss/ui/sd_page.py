@@ -142,8 +142,6 @@ class SdPage(QWidget):
             return "Device not connected."
         if self.ctl.fsm.state is not AuthState.SESSION_ACTIVE:
             return "Requires an active session."
-        if not self.ctl.fsm.sd_ready:
-            return "Unlock the device: type your PIN on the device keypad (the firmware refuses SD commands otherwise)."
         if self.busy:
             return "An SD operation is running."
         return None

@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+from io import BytesIO
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
@@ -105,6 +106,13 @@ class FileListing:
 class DownloadInfo:
     path: str
     dest_path: str
+    size: int
+
+
+@dataclass(frozen=True)
+class PreviewData:
+    path: str
+    data: bytes
     size: int
 
 
@@ -330,6 +338,27 @@ class SdService:
         total_budget = 3 * (2 * self.t.line + self.t.data_idle) + self.download_cap / 500 + 120
         return self._submit(op, body, cb, timeout=total_budget, pre=pre)
 
+    def read_for_preview(self, path: str, max_bytes: int, progress_cb: Callable[[int, int], None] | None,
+                         cb: Callable[[SdResult], None]) -> int:
+        """READ_FILE:<path> into memory (no local file), capped at max_bytes. Needs READ permission (preview);
+        a denied request sends NOTHING to the device. SdResult.value = PreviewData."""
+        op = _Op("download")  # shares the single-operation lock with list/download/upload
+        progress = _safe_progress(progress_cb)
+
+        def pre():
+            validate_remote_path(path)
+            if self.policy is not None:
+                why = self.policy.preview_block_reason(path)
+                if why:
+                    raise SdError(SdErrorCode.FORBIDDEN, why)
+
+        def body(io):
+            buf = BytesIO()
+            size = self._retry(io, op, lambda: self._download_once(io, op, path, buf, progress, cap=max_bytes))
+            return PreviewData(path, buf.getvalue(), size)
+
+        return self._submit(op, body, cb, timeout=3 * (2 * self.t.line + self.t.data_idle) + max_bytes / 500 + 120, pre=pre)
+
     def upload(self, local_path, device_name: str, progress_cb: Callable[[int, int], None] | None,
                cb: Callable[[SdResult], None]) -> int:
         """WRITE_FILE:<name>:<size> + stop-and-wait WRITE_CHUNK. Never re-sends mid-stream and never retries
@@ -553,7 +582,8 @@ class SdService:
         return FileListing(tuple(paths), skipped)
 
     # ---- DOWNLOAD ------------------------------------------------------------------------------------------------
-    def _download_once(self, io: TransactionIO, op: _Op, path: str, fh, progress) -> int:
+    def _download_once(self, io: TransactionIO, op: _Op, path: str, fh, progress, cap: int | None = None) -> int:
+        cap = self.download_cap if cap is None else cap
         fh.seek(0)
         fh.truncate()
         io.drain()
@@ -576,10 +606,10 @@ class SdService:
             progress(got, size)
 
         try:
-            if size > self.download_cap:
+            if size > cap:
                 # The firmware cannot be told to stop a READ_FILE stream, so discard it to keep the port clean.
                 self._discard(io, op, size)
-                raise SdError(SdErrorCode.TOO_LARGE, f"file is {size} bytes, above the {self.download_cap} byte cap")
+                raise SdError(SdErrorCode.TOO_LARGE, f"file is {size} bytes, above the {cap} byte cap")
             if size == 0:
                 progress(0, 0)
             else:

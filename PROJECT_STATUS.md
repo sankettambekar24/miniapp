@@ -32,3 +32,6 @@ All approved writes and cleanup succeeded; see FEATURE_PARITY 1d and docs/TEST_R
 
 ## First hardware report (2026-11-03, user)
 Flashed a single-file Stage 3 build: correct PIN gave INCORRECT. Cause (code-derived): PIN was cleared before comparison (`authenticate()` revoked the session first). Fixed in the repo sketch + regression test; 368 tests pass; the fix has NOT been re-run on hardware. Generate the IDE one-file sketch with `firmware\make_single_file.ps1`. Not VERIFIED-HARDWARE (no logs captured). The previously flashed firmware was overwritten (see DECISIONS 36).
+
+## Update 2026-11-03 (speed mode)
+Implemented and MOCK-TESTED: SD file reader (preview), per-file permissions in the SD Card page, admin Users / Devices / Audit Log, local SQLite (audit hash chain, device history, download flags), admin-only service layer. Removed: Overview, Demo mode, Device Log. NOT verified on hardware or live backend. See FEATURE_PARITY.md section 5 for enforcement labels. Live writes still needing approval to verify user management: see TEST_REPORT.md.

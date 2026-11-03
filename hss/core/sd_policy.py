@@ -54,13 +54,19 @@ MAX_PAGES = 50
 class GrantIndex:
     """display_name (== SD path) -> set of permissions the signed-in backend user holds."""
 
-    def __init__(self, perms: dict[str, frozenset[str]] | None = None, warnings: list[str] | None = None):
+    def __init__(self, perms: dict[str, frozenset[str]] | None = None, warnings: list[str] | None = None,
+                 download_blocked: frozenset[str] | set[str] | None = None):
         self.perms = dict(perms or {})
+        # LOCAL, CLIENT-ENFORCED-ONLY "read-only" flags (backend has only LIST/READ grants): preview yes, download no.
+        self.download_blocked = {x.upper() for x in (download_blocked or ())}
         self._ci = {k.upper(): v for k, v in self.perms.items()}  # FAT is case-insensitive
         self.warnings = list(warnings or [])  # backend names that are not 8.3-safe (cannot match SD files)
 
     def lookup(self, path: str) -> frozenset[str]:
         return self._ci.get(path.upper(), frozenset())
+
+    def can_download(self, path: str) -> bool:
+        return READ in self.lookup(path) and path.upper() not in self.download_blocked
 
     def __len__(self) -> int:
         return len(self.perms)
@@ -129,7 +135,8 @@ class SdPolicy:
         idx = self._grants()
         return idx is not None and permission in idx.lookup(path)
 
-    def download_block_reason(self, path: str) -> str | None:
+    def preview_block_reason(self, path: str) -> str | None:
+        """Preview needs READ (admin: always). Nothing is sent to the device when this returns a reason."""
         r = self.role
         if r == "admin":
             return None
@@ -138,3 +145,18 @@ class SdPolicy:
         if self._grants() is None:
             return self.list_block_reason()
         return None if self.can(path, READ) else "You do not hold a READ permission for this file."
+
+    def download_block_reason(self, path: str) -> str | None:
+        r = self.role
+        if r == "admin":
+            return None
+        if r != "user":
+            return "No permitted role."
+        idx = self._grants()
+        if idx is None:
+            return self.list_block_reason()
+        if not self.can(path, READ):
+            return "You do not hold a READ permission for this file."
+        if not idx.can_download(path):
+            return "Read-only access: an admin has not allowed downloading this file."
+        return None

@@ -8,7 +8,7 @@ EXCLUDES = [
     "tkinter", "unittest", "pydoc", "test", "pytest",
     "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick", "PySide6.QtQuick",
     "PySide6.QtQml", "PySide6.Qt3DCore", "PySide6.QtMultimedia", "PySide6.QtCharts", "PySide6.QtDataVisualization",
-    "PySide6.QtPdf", "PySide6.QtSql", "PySide6.QtNetwork", "PySide6.QtBluetooth", "PySide6.QtSensors",
+    "PySide6.QtSql", "PySide6.QtNetwork", "PySide6.QtBluetooth", "PySide6.QtSensors",
     "PySide6.QtPositioning", "PySide6.QtOpenGL", "PySide6.QtSvg", "PySide6.QtTest", "PySide6.QtDesigner",
 ]
 
@@ -17,7 +17,7 @@ a = Analysis(
     pathex=["."],
     binaries=[],
     datas=[("config/config.example.json", "config"), ("config/test_identities.example.json", "config")],
-    hiddenimports=[],
+    hiddenimports=["PySide6.QtPdf", "PySide6.QtPdfWidgets"],
     hookspath=[],
     runtime_hooks=[],
     excludes=EXCLUDES,

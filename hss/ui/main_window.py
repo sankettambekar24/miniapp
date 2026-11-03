@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
-                               QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+                               QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from PySide6.QtWidgets import QTabWidget
 
@@ -12,12 +12,11 @@ from .dashboards import Ctx, build_dashboard
 from .sd_page import make_sd_page
 from ..core.auth_fsm import PRODUCTION_MESSAGE, AuthState
 from ..factors.base import FACE, FINGERPRINT
-from .demo import DEMO_BANNER, DemoPage
 from .diagnostics import DiagnosticsPage
 from .qt_bridge import QtBridge
 
 BANNER_TEXT = "PIN-ONLY TEST MODE - not production authentication"
-PAGE_AUTH, PAGE_ADMIN, PAGE_USER, PAGE_LOG, PAGE_DIAG, PAGE_DEMO = range(6)
+PAGE_AUTH, PAGE_ADMIN, PAGE_USER, PAGE_DIAG = range(4)
 
 
 class MainWindow(QMainWindow):
@@ -40,18 +39,12 @@ class MainWindow(QMainWindow):
         self.banner.setStyleSheet("background:#c62828;color:white;font-weight:bold;padding:6px;")
         self.banner.setVisible(controller.config.test_mode)
         outer.addWidget(self.banner)
-        self.demo_banner = QLabel(DEMO_BANNER)
-        self.demo_banner.setObjectName("demoBanner")
-        self.demo_banner.setAlignment(Qt.AlignCenter)
-        self.demo_banner.setStyleSheet("background:#ef6c00;color:white;font-weight:bold;padding:6px;")
-        self.demo_banner.setVisible(False)
-        outer.addWidget(self.demo_banner)
 
         body = QHBoxLayout()
         outer.addLayout(body)
         self.sidebar = QListWidget()
         self.sidebar.setFixedWidth(190)
-        for label in ("Authentication", "Admin dashboard", "User dashboard", "Device log", "Diagnostics", "Demo mode"):
+        for label in ("Authentication", "Admin dashboard", "User dashboard", "Diagnostics"):
             self.sidebar.addItem(QListWidgetItem(label))
         self.sidebar.currentRowChanged.connect(self._on_sidebar)
         body.addWidget(self.sidebar)
@@ -65,13 +58,8 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(host)
         self.dash: QTabWidget | None = None   # built per PIN session, destroyed on any lock
         self.dash_ctx: Ctx | None = None
-        self.log_view = QPlainTextEdit(readOnly=True)
-        self.stack.addWidget(self.log_view)
         self.diag_page = DiagnosticsPage(controller)
         self.stack.addWidget(self.diag_page)
-        self.demo_page = DemoPage()
-        self.demo_page.exit_requested.connect(lambda: self.sidebar.setCurrentRow(PAGE_AUTH))
-        self.stack.addWidget(self.demo_page)
 
         self.usb_label = QLabel("USB: searching")
         self.mode_label = QLabel()
@@ -82,7 +70,6 @@ class MainWindow(QMainWindow):
         self.bridge.auth_changed.connect(self.refresh)
         self.bridge.usb_changed.connect(self.usb_label.setText)
         self.bridge.usb_changed.connect(self.usb_detail.setText)
-        self.bridge.device_line.connect(self._append_log)
         self.refresh()
         self.sidebar.setCurrentRow(PAGE_AUTH)
 
@@ -133,7 +120,6 @@ class MainWindow(QMainWindow):
             self.sidebar.setCurrentRow(PAGE_AUTH)
             return
         self.stack.setCurrentIndex(max(row, 0))
-        self.demo_banner.setVisible(row == PAGE_DEMO)
 
     def _allowed(self, row: int) -> bool:
         ident = self.ctl.session.identity
@@ -164,9 +150,6 @@ class MainWindow(QMainWindow):
             host.layout().addWidget(self.dash)
 
     dash_role: str | None = None
-
-    def _append_log(self, text: str) -> None:
-        self.log_view.appendPlainText(text)
 
     def refresh(self) -> None:
         fsm, cfg = self.ctl.fsm, self.ctl.config

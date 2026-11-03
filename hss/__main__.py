@@ -17,6 +17,7 @@ from .config import load_config
 from .controller import AppController
 from .firstrun import ensure_first_run
 from .ui.main_window import MainWindow
+from .ui.preview_pane import PDF_AVAILABLE
 
 
 def _smoke(app: QApplication, win: MainWindow, ctl: AppController, created: list[str], out: str | None) -> int:
@@ -31,6 +32,9 @@ def _smoke(app: QApplication, win: MainWindow, ctl: AppController, created: list
         "data_dir": str(paths.data_dir()),
         "first_run_created": created,
         "serial_started": ctl.manager.connected,
+        "pdf_preview_available": PDF_AVAILABLE,
+        "local_db_version": ctl.db.version,
+        "sidebar": [win.sidebar.item(i).text() for i in range(win.sidebar.count())],
     }
     if out:
         with open(out, "w", encoding="utf-8") as f:

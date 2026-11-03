@@ -110,6 +110,12 @@ class Rig:
         self.pump(2)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_data_dir(tmp_path, monkeypatch):
+    """Tests must never touch the real LOCALAPPDATA HSS folder (local SQLite, config)."""
+    monkeypatch.setenv("HSS_DATA_DIR", str(tmp_path / "hssdata"))
+
+
 @pytest.fixture
 def rig():
     return Rig([ST])

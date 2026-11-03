@@ -2,17 +2,33 @@
 from __future__ import annotations
 
 from .config import AppConfig
+import logging
+
+from .core.audit import DENIED, FAILURE, SUCCESS, AuditStore
 from .core.auth_fsm import AuthFSM
+from .core.devices import DeviceHistory
+from .core.localdb import LocalDb
+from .core.services import AdminService, DownloadFlags
 from .core.identity import IdentityResolver
 from .core.protocol import CMD_END_SESSION, LEGACY_SESSION_ENDED
 from .core.serial_manager import SerialManager
 from .core.session import SessionStore
 
 
+log = logging.getLogger("hss.controller")
+
+
 class AppController:
     def __init__(self, config: AppConfig, resolver: IdentityResolver | None = None,
-                 manager: SerialManager | None = None):
+                 manager: SerialManager | None = None, db: LocalDb | None = None):
         self.config = config
+        self.db = db or LocalDb()                      # LOCAL SQLite (audit, device history, download flags)
+        self.audit = AuditStore(self.db)
+        self.device_history = DeviceHistory(self.db)
+        self.download_flags = DownloadFlags(self.db)
+        self._last_port = None
+        self._last_identity = None
+        self._prev_state = None
         self.resolver = resolver or IdentityResolver.load()
         self.session = SessionStore()
         self.fsm = AuthFSM(config, self.resolver, self.session)
@@ -33,9 +49,65 @@ class AppController:
         self.manager.on_line.append(self.fsm.handle_line)
         # Optional backend client (D1 mode b). Created on demand from the dashboard; memory-only tokens live in
         # self.session, which every lock wipes. We also drop the client object itself (and its refresh token).
+        self.admin = AdminService(self)
+        self.manager.on_connected.append(self._audit_connected)
+        self.manager.on_disconnected.append(self._audit_disconnected)
+        self.fsm.listeners.append(self._audit_auth)
         self.backend = None
         self.on_backend_wait = None  # UI hook: (attempt, seconds, reason)
         self.fsm.listeners.append(self._drop_backend_unless_active)
+
+    # ---- local audit hooks (never raise into the serial/GUI threads) ----
+    def audit_event(self, action: str, *, resource: str | None = None, status: str = SUCCESS,
+                    details: str | None = None) -> None:
+        ident = self.session.identity or self._last_identity
+        port = self.manager.port or self._last_port
+        try:
+            self.audit.append(action, username=ident.name if ident else None,
+                              user_id=f"slot:{ident.slot}" if ident else None, role=ident.role if ident else None,
+                              resource=resource, device=port.device if port else None, status=status, details=details)
+        except Exception:
+            log.exception("local audit write failed")
+
+    def _audit_connected(self, gen: int, port) -> None:
+        self._last_port = port
+        try:
+            self.device_history.connected(port)
+        except Exception:
+            log.exception("device history write failed")
+        self.audit_event("DEVICE_CONNECTED", resource=port.device, details=f"{port.vid or 0:04X}:{port.pid or 0:04X} {port.description}")
+
+    def _audit_disconnected(self, reason: str) -> None:
+        try:
+            self.device_history.disconnected(self._last_port)
+        except Exception:
+            log.exception("device history write failed")
+        self.audit_event("DEVICE_DISCONNECTED", resource=self._last_port.device if self._last_port else None, details=reason)
+
+    def _audit_auth(self, fsm) -> None:
+        from .core.auth_fsm import AuthState
+        st, prev = fsm.state, self._prev_state
+        self._prev_state = st
+        if st is prev:
+            return
+        ident = self.session.identity
+        if st is AuthState.SESSION_ACTIVE and ident:
+            self._last_identity = ident
+            try:
+                self.device_history.set_user(self._last_port, ident.name)
+            except Exception:
+                log.exception("device history write failed")
+            self.audit_event("PIN_LOGIN", resource=f"slot {ident.slot}", details="PIN verified on device; PIN-ONLY TEST MODE")
+        elif st is AuthState.FAILED:
+            self.audit_event("PIN_LOGIN", status=FAILURE, details=fsm.message)
+        elif st is AuthState.LOCKED:
+            self.audit_event("DEVICE_LOCKOUT", status=FAILURE, details=fsm.message)
+        elif st is AuthState.LOCKED_ON_DISCONNECT and prev is AuthState.SESSION_ACTIVE:
+            self.audit_event("SESSION_LOCKED", details="USB disconnect")
+        elif st is AuthState.IDLE and prev is AuthState.SESSION_ACTIVE:
+            self.audit_event("LOGOUT", details=fsm.message)
+        if st is not AuthState.SESSION_ACTIVE and prev is AuthState.SESSION_ACTIVE:
+            self._last_identity = None  # later events must not be attributed to the signed-out user
 
     def _drop_backend_unless_active(self, fsm) -> None:
         from .core.auth_fsm import AuthState

@@ -1,17 +1,22 @@
-"""Physical SD card page: list / download / upload through SdService -> SerialManager only.
+"""SD Card page: list / preview / download / upload / (admin) permissions, through SdService -> SerialManager only.
 There is no local-folder substitute: if the device is not connected or no PIN session is active, controls are disabled
 with the reason. Status: IMPLEMENTED-UNTESTED on hardware; logic MOCK-TESTED (fake firmware).
+SD content access is CLIENT-ENFORCED-ONLY: the backend file-content endpoint is BLOCKED (503) and the firmware has no
+per-file permissions.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget, QMessageBox, QProgressBar,
-                               QPushButton, QVBoxLayout, QWidget)
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QProgressBar,
+                               QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
+from ..core.audit import DENIED, FAILURE, SUCCESS
 from ..core.auth_fsm import AuthState
+from ..core.preview import PREVIEW_CAP, build_preview
 from ..core.sd_ops import SdError, SdErrorCode, SdResult
+from .preview_pane import PreviewPane
 
 FRIENDLY = {
     SdErrorCode.FORBIDDEN: "Not allowed by the role/permission policy.",
@@ -54,6 +59,9 @@ class _Bridge(QObject):
 
 
 class SdPage(QWidget):
+    _after_probe = None
+    _cur: str | None = None
+
     def __init__(self, ctl, ctx=None):
         super().__init__()
         self.ctl, self.ctx = ctl, ctx
@@ -62,21 +70,36 @@ class SdPage(QWidget):
         self.br.done.connect(self._done)
         self.br.progress.connect(self._progress)
         self.busy = False
+        self.paths: list[str] = []
         lay = QVBoxLayout(self)
         self.caps = QLabel("Firmware: unknown (press 'Check firmware').")
         lay.addWidget(self.caps)
+        self.perm_label = QLabel("")
+        self.perm_label.setWordWrap(True)
+        lay.addWidget(self.perm_label)
         bar = QHBoxLayout()
         lay.addLayout(bar)
-        self.btn_perm = QPushButton("Load permissions")
-        self.btn_perm.clicked.connect(self._load_perms)
         self.btn_probe, self.btn_list = QPushButton("Check firmware"), QPushButton("Refresh list")
-        self.btn_down, self.btn_up, self.btn_cancel = QPushButton("Download selected..."), QPushButton("Upload file..."), QPushButton("Cancel")
-        for b in (self.btn_probe, self.btn_perm, self.btn_list, self.btn_down, self.btn_up, self.btn_cancel):
+        self.btn_preview, self.btn_down = QPushButton("Preview"), QPushButton("Download selected...")
+        self.btn_up, self.btn_cancel = QPushButton("Upload file..."), QPushButton("Cancel")
+        self.btn_perms = QPushButton("Permissions...")
+        for b in (self.btn_probe, self.btn_list, self.btn_preview, self.btn_down, self.btn_up, self.btn_perms,
+                  self.btn_cancel):
             bar.addWidget(b)
         bar.addStretch(1)
-        self.files = QListWidget()
-        self.files.itemSelectionChanged.connect(self.update_controls)
-        lay.addWidget(self.files, 1)
+        split = QSplitter(Qt.Horizontal)
+        self.files = QTableWidget(0, 3)
+        self.files.setHorizontalHeaderLabels(["File", "Read", "Download"])
+        self.files.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.files.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.files.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.files.horizontalHeader().setStretchLastSection(True)
+        self.files.itemSelectionChanged.connect(self._selection_changed)
+        self.pane = PreviewPane()
+        split.addWidget(self.files)
+        split.addWidget(self.pane)
+        split.setSizes([320, 520])
+        lay.addWidget(split, 1)
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         lay.addWidget(self.progress)
@@ -85,15 +108,25 @@ class SdPage(QWidget):
         lay.addWidget(self.status)
         self.btn_probe.clicked.connect(self._probe)
         self.btn_list.clicked.connect(self._list)
+        self.btn_preview.clicked.connect(self._preview)
         self.btn_down.clicked.connect(self._download)
         self.btn_up.clicked.connect(self._upload)
+        self.btn_perms.clicked.connect(self._permissions)
         self.btn_cancel.clicked.connect(self.sd.cancel)
         if ctx is not None:
             ctx.backend_changed.connect(self.update_controls)
-        ctl.fsm.listeners.append(lambda _f: self.br.progress.emit(-1, -1))  # state change -> refresh controls on GUI thread
+        ctl.fsm.listeners.append(lambda _f: self.br.progress.emit(-1, -1))  # lock/unlock -> refresh on the GUI thread
         self.update_controls()
 
     # ---- state ----
+    def _selected(self) -> str | None:
+        r = self.files.currentRow()
+        return self.paths[r] if 0 <= r < len(self.paths) else None
+
+    def _selection_changed(self) -> None:
+        self.pane.clear()
+        self.update_controls()
+
     def _reason_disabled(self) -> str | None:
         if not self.ctl.manager.connected:
             return "Device not connected."
@@ -103,33 +136,58 @@ class SdPage(QWidget):
             return "An SD operation is running."
         return None
 
+    def _fill_perms(self) -> None:
+        pol = self.ctl.sd_policy
+        for i, path in enumerate(self.paths):
+            if pol.role == "admin":
+                rd, dl = "yes (admin)", "yes (admin)"
+            else:
+                rd = "yes" if pol.preview_block_reason(path) is None else "no"
+                dl = "yes" if pol.download_block_reason(path) is None else "no"
+            self.files.setItem(i, 1, QTableWidgetItem(rd))
+            self.files.setItem(i, 2, QTableWidgetItem(dl))
+
     def update_controls(self) -> None:
         why = self._reason_disabled()
         pol = self.ctl.sd_policy
-        item = self.files.currentItem()
-        selected = item is not None
-        down_extra = "Select a file first." if not selected else pol.download_block_reason(item.text())
-        list_extra = pol.list_block_reason()
+        path = self._selected()
+        sel = "Select a file first."
         user = pol.role == "user"
-        for b, extra in ((self.btn_probe, None), (self.btn_list, list_extra),
-                         (self.btn_down, down_extra), (self.btn_up, pol.upload_block_reason())):
+        for b, extra in ((self.btn_list, pol.list_block_reason()),
+                         (self.btn_preview, sel if not path else pol.preview_block_reason(path)),
+                         (self.btn_down, sel if not path else pol.download_block_reason(path)),
+                         (self.btn_up, pol.upload_block_reason())):
             reason = why or extra
             b.setEnabled(reason is None)
             b.setToolTip(reason or "")
         self.btn_probe.setEnabled(self.ctl.manager.connected and not self.busy)
         self.btn_probe.setToolTip("" if self.btn_probe.isEnabled() else (why or ""))
-        # USER role: permissions come from the backend (sign-in required); the button only makes sense then
-        can_load = user and self.ctx is not None and self.ctx.signed_in and not self.busy
-        self.btn_perm.setVisible(user)
-        self.btn_perm.setEnabled(can_load)
-        self.btn_perm.setToolTip("" if can_load else "Sign in to the backend first (Backend tab).")
+        admin = pol.role == "admin"
+        can_perm = admin and self.ctx is not None and self.ctx.signed_in and path is not None and not self.busy
+        self.btn_perms.setVisible(admin)
+        self.btn_perms.setEnabled(can_perm)
+        self.btn_perms.setToolTip("" if can_perm else
+                                  ("Select a file first." if path is None else "Sign in to the backend first (Backend tab)."))
         self.btn_cancel.setEnabled(self.busy)
         self.btn_cancel.setToolTip("" if self.busy else "Nothing to cancel.")
+        if user:
+            have = self.ctl.grants is not None
+            self.perm_label.setText(
+                "Your permissions load automatically from the backend after you sign in (Backend tab). " +
+                (f"Loaded for {len(self.ctl.grants)} file(s). Read = preview; Download needs Read plus admin approval."
+                 if have else "Not loaded yet: nothing can be listed, previewed or downloaded."))
+        else:
+            self.perm_label.setText("Admin: list / preview / download / upload everything. Permissions... assigns per-user "
+                                    "Read (backend grants) and Download (LOCAL flag).")
         if why and not self.busy:
-            self.files.clear()
+            self.files.setRowCount(0)
+            self.paths = []
+        else:
+            self._fill_perms()
         c = self.sd.capabilities
         if c:
-            self.caps.setText(f"Firmware {c.version.version}: auth={c.auth_mode}, slots={c.version.slots}, request IDs={'on' if c.wire_ids else 'off'}")
+            self.caps.setText(f"Firmware {c.version.version}: auth={c.auth_mode}, slots={c.version.slots}, "
+                              f"request IDs={'on' if c.wire_ids else 'off'}")
 
     def _start(self, text: str) -> None:
         self.busy = True
@@ -137,10 +195,16 @@ class SdPage(QWidget):
         self.progress.setVisible(False)
         self.update_controls()
 
+    def _show_progress(self) -> None:
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
+
     # ---- actions ----
-    def _load_perms(self) -> None:
-        if self.ctx is not None:
-            self.ctx.load_grants(self.status.setText)
+    def _permissions(self) -> None:
+        path = self._selected()
+        if path and self.ctx is not None:
+            from .permissions_dialog import PermissionsDialog
+            PermissionsDialog(self.ctx, path, self).exec()
 
     def _probe(self) -> None:
         self._start("Asking the device for its firmware version ...")
@@ -154,32 +218,42 @@ class SdPage(QWidget):
         self._start("Listing the SD card ...")
         self.sd.list_files(lambda r: self.br.done.emit("list", r))
 
-    _after_probe = None
+    def _preview(self) -> None:
+        path = self._selected()
+        if not path:
+            return
+        self._cur = path
+        self.pane.clear("Reading file from the device ...")
+        self._start(f"Reading {path} for preview ...")
+        self._show_progress()
+        self.sd.read_for_preview(path, PREVIEW_CAP, lambda d, t: self.br.progress.emit(d, t),
+                                 lambda r: self.br.done.emit("preview", r))
 
     def _download(self) -> None:
-        item = self.files.currentItem()
-        if not item:
+        path = self._selected()
+        if not path:
             return
-        remote = item.text()
-        dest, _ = QFileDialog.getSaveFileName(self, "Save downloaded file as", str(Path.home() / Path(remote).name))
+        dest, _ = QFileDialog.getSaveFileName(self, "Save downloaded file as", str(Path.home() / Path(path).name))
         if not dest:
             return
-        self._start(f"Downloading {remote} ...")
-        self.progress.setVisible(True)
-        self.progress.setValue(0)
-        self.sd.download(remote, dest, lambda d, t: self.br.progress.emit(d, t), lambda r: self.br.done.emit("download", r))
+        self._cur = path
+        self._start(f"Downloading {path} ...")
+        self._show_progress()
+        self.sd.download(path, dest, lambda d, t: self.br.progress.emit(d, t), lambda r: self.br.done.emit("download", r))
 
     def _upload(self) -> None:
         src, _ = QFileDialog.getOpenFileName(self, "Choose a file to upload to the SD card")
         if not src:
             return
-        name, ok = QInputDialog.getText(self, "Upload", "File name on the SD card (root level, no folders):", text=Path(src).name)
+        name, ok = QInputDialog.getText(self, "Upload", "File name on the SD card (root level, no folders):",
+                                        text=Path(src).name)
         if not ok or not name.strip():
             return
+        self._cur = name.strip()
         self._start(f"Uploading {name.strip()} ...")
-        self.progress.setVisible(True)
-        self.progress.setValue(0)
-        self.sd.upload(src, name.strip(), lambda d, t: self.br.progress.emit(d, t), lambda r: self.br.done.emit("upload", r))
+        self._show_progress()
+        self.sd.upload(src, name.strip(), lambda d, t: self.br.progress.emit(d, t),
+                       lambda r: self.br.done.emit("upload", r))
 
     # ---- results (GUI thread) ----
     def _progress(self, done: int, total: int) -> None:
@@ -189,22 +263,43 @@ class SdPage(QWidget):
         self.progress.setMaximum(max(total, 1))
         self.progress.setValue(done)
 
+    _AUDIT = {"list": "SD_LIST", "preview": "FILE_PREVIEW", "download": "FILE_DOWNLOAD", "upload": "FILE_UPLOAD",
+              "probe": "SD_FIRMWARE_CHECK"}
+
+    def _audit(self, kind: str, res: SdResult) -> None:
+        status = SUCCESS if res.ok else (DENIED if res.error.code is SdErrorCode.FORBIDDEN else FAILURE)
+        detail = "" if res.ok else describe(res.error)
+        if res.ok and kind == "download":
+            detail = f"{res.value.size} bytes"
+        resource = "SD card" if kind in ("list", "probe") else self._cur
+        self.ctl.audit_event(self._AUDIT[kind], resource=resource, status=status, details=detail)
+
     def _done(self, kind: str, res: SdResult) -> None:
         self.busy = False
         self.progress.setVisible(False)
+        self._audit(kind, res)
         if not res.ok:
             self._after_probe = None
             self.status.setText(f"{kind} failed: {describe(res.error)}")
+            if kind == "preview":
+                code = res.error.code
+                self.pane.show_message("Too large to preview. Download it instead." if code is SdErrorCode.TOO_LARGE
+                                       else f"Preview failed: {FRIENDLY.get(code, code.value)}")
             self.update_controls()
             return
         v = res.value
         if kind == "list":
-            self.files.clear()
-            self.files.addItems(list(v.paths))
+            self.paths = list(v.paths)
+            self.files.setRowCount(len(self.paths))
+            for i, p in enumerate(self.paths):
+                self.files.setItem(i, 0, QTableWidgetItem(p))
             extra = f" ({v.skipped} entries skipped: unsupported names)" if v.skipped else ""
             if v.hidden:
                 extra += f" ({v.hidden} hidden: no LIST permission)"
-            self.status.setText(f"{len(v.paths)} file(s) on the SD card{extra}.")
+            self.status.setText(f"{len(self.paths)} file(s) on the SD card{extra}.")
+        elif kind == "preview":
+            self.pane.show_preview(v.path, build_preview(v.path, v.data))
+            self.status.setText(f"Previewed {v.path} ({v.size} bytes).")
         elif kind == "download":
             self.status.setText(f"Downloaded {v.path} ({v.size} bytes) to {v.dest_path}.")
         elif kind == "upload":

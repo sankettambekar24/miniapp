@@ -132,7 +132,7 @@ Old-app evidence summary: no bench/hardware test evidence exists (`DOCS/portable
 | --- | --- | --- | --- | --- |
 | Admin dashboard (role from identity file only) | user prompt | `hss/ui/dashboards.py`; role from `hss/core/auth_fsm.py` identity resolution, no selector | MOCK-TESTED (offscreen UI, `test_dashboards.py`) | PIN slot -> local identity file; hardware not run |
 | User dashboard | user prompt | same; admin-only tabs absent | MOCK-TESTED | same |
-| Overview (real or absent data; no demo data) | user prompt | `Overview` in dashboards.py; counts only after backend sign-in | MOCK-TESTED | backend optional |
+| Overview | user prompt | REMOVED-BY-REQUEST 2026-11-03 (sidebar, page, code, tests). Landing page: Users (admin) / SD Card (user) | REMOVED-BY-REQUEST | n/a |
 | User management (list/create/disable/set role) | user prompt | `_users_tab`; `BackendClient.list_users/create_user/disable_user/set_user_role` | MOCK-TESTED; VERIFIED-LIVE-API: list, create, disable (live 2026-11-03 (evidence `live_20261103T034513_write.json`)); set role IMPLEMENTED-UNTESTED | backend JWT sign-in |
 | Device registry (list/register/status/assign) | user prompt | `_devices_tab` | MOCK-TESTED; VERIFIED-LIVE-API: list, create, status PENDING->ACTIVE->REVOKED (live 2026-11-03 (evidence `live_20261103T034513_write.json`)); assign IMPLEMENTED-UNTESTED | backend JWT sign-in |
 | File metadata + permission grants (list/add/grant/revoke) | user prompt | `_files_tab`; grants LIST/READ only (backend schema) | MOCK-TESTED; VERIFIED-LIVE-API: list, metadata create, LIST grant create + revoke (live 2026-11-03 (evidence `live_20261103T034513_write.json`)); grants list IMPLEMENTED-UNTESTED | backend JWT sign-in |
@@ -214,3 +214,20 @@ No secret values were read or printed. Candidate locations:
 - Feature rows: 71 (all NOT-STARTED unless DROP noted); 10 are section header rows excluded.
 - Verification split (by row, approximate): MOCK-TESTED 8, BLOCKED 13, rest IMPLEMENTED-UNTESTED / NOT-STARTED (a few rows carry two labels). VERIFIED-HARDWARE: 0. VERIFIED-LIVE-API: 0.
 - DROP recommended: legacy PBKDF2 auth (backend replaced by Django), legacy resource permission engine, marker-file IPC, bundled venv/zip artefacts, physical-SD `LIST_FILES` loop as written (redesign).
+
+## 5. Speed-mode feature set (2026-11-03) - enforcement labels
+
+Legend: BACKEND-ENFORCED = proven by a live test or source citation in BACKEND_ANALYSIS.md. CLIENT-ENFORCED-ONLY = checked only by this app (defense in depth; a patched client skips it). All items MOCK-TESTED unless noted; nothing here was run on hardware.
+
+| Feature | Behaviour | Enforcement | Status |
+| --- | --- | --- | --- |
+| Overview page | REMOVED-BY-REQUEST | n/a | REMOVED-BY-REQUEST |
+| Demo mode | REMOVED-BY-REQUEST (page, banner, nav, tests). Production stays fail-closed; test mode only via config.json mode=pin_test (red banner) | n/a | REMOVED-BY-REQUEST |
+| Device Log page | REMOVED-BY-REQUEST; replaced by Admin > Audit Log | n/a | REMOVED-BY-REQUEST |
+| SD file reader (Preview) | READ_FILE via SerialManager into memory (cap 2 MB), type by extension AND magic; text/log/md/csv/json/xml/html (escaped source), png/jpg/gif/bmp, pdf (QtPdf), docx/xlsx (zipfile+ElementTree, zip-bomb/DTD guards) | CLIENT-ENFORCED-ONLY (preview needs READ; denied = nothing sent to device) | MOCK-TESTED; PDF bundling checked by frozen smoke (`pdf_preview_available`) |
+| Per-file permissions (SD Card page, admin) | Read = backend grants LIST+READ (POST /files/{id}/grants/, /revoke/); Download = LOCAL flag (backend has no download grant) | Grant create/revoke rows 23-24: route exists, writes IMPLEMENTED-UNTESTED live (grant create/revoke were VERIFIED-LIVE-API in the 2026-11-03 write run). Download flag and all SD content access: CLIENT-ENFORCED-ONLY, because file content is BLOCKED (503) and firmware has no per-file permissions | MOCK-TESTED |
+| USER permissions | Loaded automatically after backend sign-in (one attempt per sign-in); per-file Read / Download columns | CLIENT-ENFORCED-ONLY (index comes from backend GETs) | MOCK-TESTED |
+| Admin > Users | create / view / edit role+status / disable (no delete: backend has none) / enable via /admin/users routes; LOCAL TEST identities shown read-only in test mode | Role/admin checks on routes: BACKEND-ENFORCED (source, `accounts/views.py`); app-side admin check CLIENT-ENFORCED-ONLY | create+disable VERIFIED-LIVE-API earlier; PATCH enable, role: IMPLEMENTED-UNTESTED; UI MOCK-TESTED |
+| Admin > Devices | backend registry + LOCAL USB history (SQLite, dedup VID+PID+serial else description, never deleted); each row labelled BACKEND or LOCAL; IP only from backend else n/a | GET /devices/ admin-all: BACKEND-ENFORCED (source); local history CLIENT-ONLY | MOCK-TESTED |
+| Admin > Audit Log | LOCAL append-only hash-chained SQLite + backend audit events (GET); filters user/action/date/result/text; redaction of PINs, passwords, tokens, auth headers before storage | Backend audit admin-only + append-only: BACKEND-ENFORCED (DB triggers, source). Local rows: NOT tamper-proof vs file access | MOCK-TESTED |
+| USER cannot reach admin features | service layer (`hss/core/services.py`) refuses non-admin callers with typed PermissionDenied before any backend call; sidebar/tabs not built for USER | CLIENT-ENFORCED-ONLY (backend independently enforces IsAdminRole on admin routes: BACKEND-ENFORCED per source) | MOCK-TESTED (every service x USER and ADMIN) |

@@ -33,5 +33,9 @@ class IdentityResolver:
         except Exception as exc:
             return cls(warning=f"identity file invalid ({type(exc).__name__}); no slot can resolve")
 
+    def items(self) -> list[tuple[int, str, str]]:
+        """(slot, identity name, role) - LOCAL TEST identities, no PIN data exists in this file."""
+        return [(k, v.name, v.role) for k, v in sorted(self._slots.items())]
+
     def resolve(self, slot: int | None) -> Identity | None:
         return None if slot is None else self._slots.get(slot)

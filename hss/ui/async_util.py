@@ -40,8 +40,11 @@ class Runner(QObject):
 
     def _on_done(self, token: int, result, error) -> None:
         ok, err = self._cbs.pop(token, (None, None))
-        if error is not None:
-            if err:
-                err(error)
-        elif ok:
-            ok(result)
+        try:
+            if error is not None:
+                if err:
+                    err(error)
+            elif ok:
+                ok(result)
+        except RuntimeError:
+            pass  # the target widget was destroyed (e.g. dashboard torn down on lock) while the call was running

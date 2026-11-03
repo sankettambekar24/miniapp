@@ -65,19 +65,6 @@ def test_admin_slot_routes_to_admin(app):
     assert w.stack.currentIndex() == PAGE_ADMIN
 
 
-def test_demo_page_is_isolated_and_all_actions_disabled(app):
-    from PySide6.QtWidgets import QPushButton
-    rig = Rig([ST])
-    w = MainWindow(rig.ctl)
-    w.sidebar.setCurrentRow(5)
-    assert not w.demo_banner.isHidden() and "DEMO MODE" in w.demo_banner.text()
-    acts = [b for b in w.demo_page.findChildren(QPushButton) if b is not w.demo_page.exit_btn]
-    assert acts and all(not b.isEnabled() and b.toolTip() for b in acts)
-    assert rig.ctl.fsm.state.value == "IDLE" and not rig.ctl.session.active and not rig.opened
-    w.sidebar.setCurrentRow(PAGE_AUTH)
-    assert w.demo_banner.isHidden()
-
-
 def test_diagnostics_page_lists_ports_and_rescan(app):
     rig = Rig([ST])
     w = MainWindow(rig.ctl)

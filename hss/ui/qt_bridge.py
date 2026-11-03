@@ -9,7 +9,6 @@ from ..controller import AppController
 class QtBridge(QObject):
     auth_changed = Signal()
     usb_changed = Signal(str)
-    device_line = Signal(str)
 
     def __init__(self, controller: AppController):
         super().__init__()
@@ -19,7 +18,6 @@ class QtBridge(QObject):
         m.on_connected.append(lambda gen, port: self.usb_changed.emit(f"USB: connected ({port.device})"))
         m.on_disconnected.append(lambda reason: self.usb_changed.emit(f"USB: disconnected ({reason})"))
         m.on_scan.append(self._on_scan)
-        m.on_line.append(lambda ev: self.device_line.emit(ev.text))
 
     def _on_scan(self, result) -> None:
         if self.controller.manager.connected:

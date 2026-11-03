@@ -33,8 +33,8 @@ def test_admin_dashboard_tabs_and_role_from_identity_only(app):
     w = MainWindow(rig.ctl)
     login(rig, w, 1)
     assert w.stack.currentIndex() == PAGE_ADMIN and w.dash.objectName() == "adminDashboard"
-    assert tab_titles(w.dash) == ["Overview", "Physical SD", "Users", "Devices", "Files & permissions", "Audit",
-                                  "Offline policies", "Backend"]
+    assert tab_titles(w.dash) == ["Users", "SD Card", "Devices", "Audit Log", "Offline policies", "Backend"]
+    assert w.dash.currentIndex() == 0  # lands on Users
 
 
 def test_user_dashboard_has_no_admin_tabs(app):
@@ -43,8 +43,8 @@ def test_user_dashboard_has_no_admin_tabs(app):
     login(rig, w, 2)
     assert w.stack.currentIndex() == PAGE_USER and w.dash.objectName() == "userDashboard"
     titles = tab_titles(w.dash)
-    assert "Users" not in titles and "Audit" not in titles and "Devices" not in titles
-    assert "My files (backend)" in titles and "Physical SD" in titles
+    assert titles == ["SD Card", "Backend"] and w.dash.currentIndex() == 0  # lands on SD Card
+    assert "Overview" not in titles
 
 
 def test_every_backend_control_disabled_with_reason_when_not_signed_in(app):
@@ -53,14 +53,14 @@ def test_every_backend_control_disabled_with_reason_when_not_signed_in(app):
     login(rig, w, 1)
     checked = 0
     for i in range(w.dash.count()):
-        t = w.dash.widget(i)
+        t = getattr(w.dash.widget(i), "list_tab", w.dash.widget(i))
         if isinstance(t, ListTab):
             for b, a in t.btns:
                 assert not b.isEnabled() and b.toolTip(), (w.dash.tabText(i), a.label)
                 checked += 1
             assert not t.refresh_btn.isEnabled() and t.refresh_btn.toolTip() == SIGN_IN_REASON
             assert "No data" in t.status.text()
-    assert checked >= 10
+    assert checked >= 5
 
 
 def test_blocked_backend_features_are_permanently_disabled_with_explanation(app):
@@ -69,13 +69,12 @@ def test_blocked_backend_features_are_permanently_disabled_with_explanation(app)
     login(rig, w, 1)
     texts = {}
     for i in range(w.dash.count()):
-        t = w.dash.widget(i)
+        t = getattr(w.dash.widget(i), "list_tab", w.dash.widget(i))
         if isinstance(t, ListTab):
             for b, a in t.btns:
                 if a.blocked:
                     texts[a.label] = b.toolTip()
                     assert not b.isEnabled()
-    assert "BLOCKED" in texts["Download content"] and "503" in texts["Download content"]
     assert "BLOCKED" in texts["Issue policy"] and "503" in texts["Issue policy"]
     assert HW_BLOCKED.startswith("BLOCKED")
 
@@ -84,7 +83,7 @@ def test_sd_page_disabled_when_session_ends_and_dashboard_destroyed_on_unplug(ap
     rig = Rig([ST])
     w = MainWindow(rig.ctl)
     login(rig, w, 1)
-    sd = [w.dash.widget(i) for i in range(w.dash.count()) if w.dash.tabText(i) == "Physical SD"][0]
+    sd = [w.dash.widget(i) for i in range(w.dash.count()) if w.dash.tabText(i) == "SD Card"][0]
     sd.update_controls()
     assert sd.btn_list.isEnabled() and not sd.btn_down.isEnabled() and sd.btn_down.toolTip() == "Select a file first."
     rig.unplug()
@@ -127,7 +126,7 @@ def test_no_enabled_button_without_an_action(app):
 
 # ---- decision 19 in the UI ----
 def _sd_page(w):
-    return [w.dash.widget(i) for i in range(w.dash.count()) if w.dash.tabText(i) == "Physical SD"][0]
+    return [w.dash.widget(i) for i in range(w.dash.count()) if w.dash.tabText(i) == "SD Card"][0]
 
 
 def test_user_sd_page_upload_disabled_admin_only_and_list_needs_permissions(app):
@@ -138,13 +137,14 @@ def test_user_sd_page_upload_disabled_admin_only_and_list_needs_permissions(app)
     sd.update_controls()
     assert not sd.btn_up.isEnabled() and "admin" in sd.btn_up.toolTip().lower()
     assert not sd.btn_list.isEnabled() and "permissions" in sd.btn_list.toolTip().lower()
-    assert not sd.btn_perm.isHidden() and not sd.btn_perm.isEnabled()
+    assert sd.btn_perms.isHidden()  # admin-only control
     from hss.core.sd_policy import GrantIndex
     rig.ctl.grants = GrantIndex({"a.txt": frozenset({"LIST"})})
     sd.update_controls()
     assert sd.btn_list.isEnabled()
-    sd.files.addItem("a.txt")
-    sd.files.setCurrentRow(0)
+    sd.paths = ["a.txt"]
+    sd.files.setRowCount(1)
+    sd.files.setCurrentCell(0, 0)
     sd.update_controls()
     assert not sd.btn_down.isEnabled() and "READ" in sd.btn_down.toolTip()   # LIST only, no READ
     rig.ctl.grants = GrantIndex({"a.txt": frozenset({"LIST", "READ"})})
@@ -158,4 +158,4 @@ def test_admin_sd_page_upload_enabled(app):
     login(rig, w, 1)
     sd = _sd_page(w)
     sd.update_controls()
-    assert sd.btn_up.isEnabled() and sd.btn_perm.isHidden()
+    assert sd.btn_up.isEnabled() and not sd.btn_perms.isHidden()

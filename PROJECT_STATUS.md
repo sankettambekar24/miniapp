@@ -38,3 +38,6 @@ Implemented and MOCK-TESTED: SD file reader (preview), per-file permissions in t
 
 ## Update 2026-11-03 (second speed run)
 Default build = backend password login (fail-closed), internal backend with health indicator, Backend tab removed, working admin user creation (mock-tested; live script ready), dark theme with contrast test, upload fixed (READY handshake + 8.3 + dialog; mock-tested only), IST timestamps, IP shown only when the backend supplies it. Hardware and live-user-lifecycle runs still pending the user (see TEST_REPORT.md).
+
+## Update 2026-11-03 (third speed run: three-factor)
+SD refresh fixed (gate removed), upload unchanged and re-tested, design `docs/THREE_FACTOR_DESIGN.md`, firmware 0.4.0-stage6 three-factor flow COMPILED (not flashed, not hardware-verified), desktop three-factor auth + enrollment wizard + DPAPI face templates + local permissions + backend service tab MOCK-TESTED. Hardware script: `tests/hardware/THREE_FACTOR_TEST.md`.

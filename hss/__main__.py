@@ -18,8 +18,17 @@ from .config import load_config
 from .controller import AppController
 from .firstrun import ensure_first_run
 from .ui.main_window import MainWindow
+from .core.face import CAMERA_LABEL, DETECTOR_MODEL, RECOGNIZER_MODEL, default_model_dir
 from .ui import theme
 from .ui.preview_pane import PDF_AVAILABLE
+
+
+def _cv2_version() -> str | None:
+    try:
+        import cv2
+        return cv2.__version__
+    except Exception:
+        return None
 
 
 def _smoke(app: QApplication, win: MainWindow, ctl: AppController, created: list[str], out: str | None) -> int:
@@ -39,7 +48,11 @@ def _smoke(app: QApplication, win: MainWindow, ctl: AppController, created: list
         "time_zone_source": clock.TZ_SOURCE,
         "time_sample": clock.format_ist("2026-11-03T12:15:32Z"),
         "production_banner_visible": not win.mode_banner.isHidden(),
-        "login_form_visible": not win.login_box.isHidden(),
+        "three_step_panel_visible": not win.steps_box.isHidden(),
+        "password_login_present": hasattr(win, "login_box"),
+        "face_models_bundled": all((default_model_dir() / m).is_file() for m in (DETECTOR_MODEL, RECOGNIZER_MODEL)),
+        "opencv_importable": _cv2_version(),
+        "camera_label": CAMERA_LABEL,
         "local_db_version": ctl.db.version,
         "sidebar": [win.sidebar.item(i).text() for i in range(win.sidebar.count())],
     }

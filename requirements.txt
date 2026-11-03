@@ -1,2 +1,4 @@
 PySide6>=6.6
 pyserial>=3.5
+opencv-python-headless>=5.0   # Apache-2.0; face detection/recognition on the laptop webcam (~44 MB wheel)
+numpy>=2.0                    # BSD-3-Clause (~13 MB wheel)

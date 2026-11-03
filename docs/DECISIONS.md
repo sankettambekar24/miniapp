@@ -84,3 +84,11 @@
 48. **Upload follows the firmware contract:** wait for `WRITE_CHUNK_READY` before payload; local 8.3 root-name validation; suggestion helper; dialog shows name/type/size.
 49. **Time:** all timestamps through `hss/core/clock.py`; UTC ISO in storage, IST on screen; no tzdata dependency (fixed +05:30 fallback, exact for IST).
 50. **IP:** never invented; only a valid IP literal returned by the backend is shown, else "n/a".
+
+51. **Login = three factors (2026-11-03, user-confirmed).** The backend-password login is removed. Order: fingerprint -> face -> PIN, firmware build `HSS_REQUIRE_FACTORS=1`; PIN-only slot build stays for testing behind the explicit test-mode flag.
+52. **Face runs on the PC** (F401 cannot). Camera = "Laptop webcam (development/test camera)". OpenCV YuNet + SFace, cosine 0.363, 2 consecutive good frames. **No liveness.** The verdict line is plaintext over serial; HMAC with a host-held key would only be a partial mitigation and is NOT implemented.
+53. **Per-user PIN on the device:** PBKDF2-HMAC-SHA256, 5000 iterations, 16-byte salt (UID + micros + counter; F401 has no RNG), stored in flash EEPROM emulation (not on the SD card, which `READ_FILE` can read). Offline brute force is possible if flash is dumped (RDP not enabled); records are wiped by a full-chip erase.
+54. **Host trusts AUTH_OK only after its own face verdict** for the same id (120 s window) and only for an ENROLLED record; otherwise it rejects and sends END_SESSION.
+55. **Bootstrap:** with an empty device store the build-time PIN (`HSS_PIN_SLOT1`) opens an enrollment-only session; finishing the first admin marks older host records INCOMPLETE (the device lost their PINs).
+56. **Permissions are LOCAL** (schema v3 `file_permissions`): hardware logins have no backend identity, so backend grants cannot express per-user access. Default deny; Download is its own permission.
+57. **Backend = optional admin service connection**, separate tab, memory-only tokens wiped on lock.

@@ -23,3 +23,6 @@ build/
 tests/live/APPROVED_ENDPOINTS.txt
 
 firmware/single_file/
+
+# face model weights are downloaded, not committed (see models/README.md)
+models/*.onnx

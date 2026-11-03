@@ -1,7 +1,7 @@
 <#
   Build the HSS firmware with the project-local Arduino CLI (tools\arduino-cli, STM32duino core).
   Default: PIN-only build (HSS_REQUIRE_FACTORS=0). Use -Factors for the THREE-FACTOR build (fingerprint -> face -> per-user PIN; docs/THREE_FACTOR_DESIGN.md).
-  Outputs: build\pinonly\ or buildactors\ (never mixed).
+  Outputs: build\pinonly\ or build\factors\ (never mixed).
 
   First run creates firmware\hss_firmware\pins_local.h (git-ignored) with two random distinct 4-digit test PINs.
   The PINs are NOT printed; read them from that file on your own machine (slot 1 = admin test, slot 2 = user test)
@@ -18,7 +18,7 @@ $root  = Split-Path -Parent $PSScriptRoot
 $cli   = Join-Path $root "tools\arduino-cli\arduino-cli.exe"
 $cfg   = Join-Path $root "tools\arduino-data\arduino-cli.yaml"
 $sketch = Join-Path $PSScriptRoot "hss_firmware"
-$out   = Join-Path $PSScriptRoot $(if ($Factors) { "buildactors" } else { "build\pinonly" })
+$out   = Join-Path $PSScriptRoot $(if ($Factors) { "build\factors" } else { "build\pinonly" })
 $pins  = Join-Path $sketch "pins_local.h"
 
 if (-not (Test-Path $cli)) { throw "arduino-cli not found at $cli (see docs/TOOLCHAIN.md)" }
